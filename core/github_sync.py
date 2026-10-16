@@ -33,7 +33,7 @@ logger = logging.getLogger("GitHubSync")
 
 # Critical files that must NEVER be committed to GitHub under any circumstances
 BLOCKED_PATTERNS = [
-    r"^\.env(\..+)?$",
+    r"^\.env(\.(local|dev|prod|test|secrets|stage))?$",
     r"^client_secret.*\.json$",
     r"^token.*\.json$",
     r"^token.*\.pickle$",
