@@ -1,0 +1,57 @@
+# ==============================================================================
+# Security & Secret Shield Git Ignore
+# Prevents accidental leaking of API keys, tokens, session cookies, and profiles
+# ==============================================================================
+
+# Credentials & API Keys
+.env
+.env.*
+!.env.example
+client_secret*.json
+token*.json
+token*.pickle
+social_credentials*.json
+
+# Browser Sessions & Cookies (High Value Hijacking Targets)
+assets/browser_profiles/
+storage/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Security Baseline & Hash Signatures
+.security_baseline.json
+
+# Logs, Output & Media Caches
+output/
+*.log
+autostart.log
+output/autostart.log
+output/security_audit.log
+Story/completed/
+Story/failed/
+Story/pending/
+Story/Post/*
+!Story/Post/.gitkeep
+Story/*.jpg
+Story/*.png
+Story/*.mp4
+Story/*.txt
+!Story/README.txt
+
+# Python Virtual Environment & Bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Operating System & IDE Artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~

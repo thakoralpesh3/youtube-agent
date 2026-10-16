@@ -1,0 +1,17 @@
+google-genai>=1.0.0
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+edge-tts>=6.1.0
+moviepy>=1.0.3,<2.0.0
+imageio-ffmpeg>=0.4.9
+Pillow>=10.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+schedule>=1.2.0
+tqdm>=4.66.0
+rich>=13.0.0
+gTTS>=2.5.0
+dulwich>=0.21.0
+PyGithub>=2.0.0

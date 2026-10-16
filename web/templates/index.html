@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🎬 YouTube & Social AI Agent - 24/7 Cloud Control Center</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fff1f2',
+                            500: '#f43f5e',
+                            600: '#e11d48',
+                            900: '#881337',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glow-red {
+            box-shadow: 0 0 20px -5px rgba(244, 63, 94, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-rose-500 selection:text-white pb-12">
+
+    <!-- Top Navigation -->
+    <header class="sticky top-0 z-40 glass border-b border-slate-800">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center font-bold text-white shadow-lg glow-red text-lg">
+                    AI
+                </div>
+                <div>
+                    <h1 class="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                        Creator Sentinel 24/7
+                        <span class="inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-400 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> ONLINE
+                        </span>
+                    </h1>
+                    <p class="text-xs text-slate-400 hidden sm:block">Chamunda Automobile Parts & Services • Royal Enfield Autonomous Studio</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-2">
+                <button onclick="refreshData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1.5 transition">
+                    <svg class="w-4 h-4" id="refresh-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    <span class="hidden sm:inline">Sync</span>
+                </button>
+                <button onclick="logout()" class="p-2 rounded-lg bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 text-xs transition" title="Lock Dashboard">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toast Notification Banner -->
+    <div id="toast" class="fixed top-16 right-4 z-50 transition-all duration-300 transform translate-y-[-100px] opacity-0 max-w-sm rounded-xl px-4 py-3 shadow-2xl glass flex items-center gap-3">
+        <span id="toast-icon">ℹ️</span>
+        <span id="toast-msg" class="text-sm font-medium">Notification message</span>
+    </div>
+
+    <!-- Main Container -->
+    <main class="max-w-5xl mx-auto px-4 pt-6 space-y-6">
+
+        <!-- Password Modal (Shown if not authenticated) -->
+        <div id="auth-modal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 hidden">
+            <div class="glass p-6 sm:p-8 rounded-2xl max-w-md w-full shadow-2xl space-y-5 border border-slate-700/60">
+                <div class="text-center space-y-2">
+                    <div class="w-12 h-12 rounded-2xl bg-rose-600/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto text-2xl font-bold">
+                        🔒
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Security Verification</h2>
+                    <p class="text-xs text-slate-400">Enter your Dashboard Access Password to connect to your 24/7 Cloud AI Agent.</p>
+                </div>
+                <form onsubmit="handleLogin(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Password</label>
+                        <input type="password" id="auth-password" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 text-sm" placeholder="Enter password..." required>
+                    </div>
+                    <button type="submit" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 font-semibold text-sm text-white shadow-lg transition duration-150">
+                        Unlock Control Center
+                    </button>
+                    <p id="auth-error" class="text-xs text-rose-400 text-center font-medium hidden">Invalid password. Access denied.</p>
+                </form>
+            </div>
+        </div>
+
+        <!-- System Telemetry & Health Grid -->
+        <section class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <!-- Card 1: System Daemon -->
+            <div class="glass p-4 rounded-2xl border border-slate-800 space-y-1">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium text-slate-400">Autonomous Daemon</span>
+                    <span class="text-base">🤖</span>
+                </div>
+                <div class="text-sm sm:text-base font-bold text-emerald-400 flex items-center gap-1.5" id="stat-daemon">
+                    Active (24/7)
+                </div>
+                <p class="text-[10px] text-slate-400" id="stat-model">Gemini 3.8 Flash</p>
+            </div>
+
+            <!-- Card 2: YouTube Channel -->
+            <div class="glass p-4 rounded-2xl border border-slate-800 space-y-1">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium text-slate-400">YouTube Channel</span>
+                    <span class="text-base">🔴</span>
+                </div>
+                <div class="text-sm sm:text-base font-bold text-slate-100" id="stat-youtube">
+                    Syncing...
+                </div>
+                <p class="text-[10px] text-slate-400" id="stat-yt-details">Target: UNLISTED</p>
+            </div>
+
+            <!-- Card 3: Social Media (IG/FB/WA) -->
+            <div class="glass p-4 rounded-2xl border border-slate-800 space-y-1">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium text-slate-400">Social Sessions</span>
+                    <span class="text-base">🌐</span>
+                </div>
+                <div class="text-sm sm:text-base font-bold text-slate-100" id="stat-social">
+                    Connected
+                </div>
+                <p class="text-[10px] text-slate-400" id="stat-social-details">IG • FB • WA Profile</p>
+            </div>
+
+            <!-- Card 4: Cybersecurity Sentinel -->
+            <div class="glass p-4 rounded-2xl border border-slate-800 space-y-1">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium text-slate-400">Cyber Sentinel</span>
+                    <span class="text-base">🛡️</span>
+                </div>
+                <div class="text-sm sm:text-base font-bold text-emerald-400" id="stat-security">
+                    SECURE (0 Threats)
+                </div>
+                <p class="text-[10px] text-slate-400" id="stat-sec-details">FIM SHA-256 Intact</p>
+            </div>
+        </section>
+
+        <!-- Chamunda Automobile Campaign Banner -->
+        <section class="glass p-5 rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-950/20 via-slate-900 to-rose-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div class="space-y-1">
+                <div class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                    <span>🏍️</span> Chamunda Automobile Parts & Services
+                </div>
+                <h3 class="text-base sm:text-lg font-bold text-white">Royal Enfield Autonomous Festival Agent</h3>
+                <p class="text-xs text-slate-300" id="festival-indicator">Checking upcoming festive dates...</p>
+            </div>
+            <button onclick="triggerFestival()" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 font-bold text-xs text-white shadow-lg transition flex items-center justify-center gap-2">
+                <span>🎉</span> Trigger Campaign Now
+            </button>
+        </section>
+
+        <!-- AI Creative Evolution & Surprise Sparks Section -->
+        <section class="glass p-5 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/30 via-slate-900 to-purple-950/30 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">💡</span>
+                        <h3 class="text-base font-bold text-white tracking-wide">AI Creative Evolution & Surprise Sparks</h3>
+                        <span id="evo-level-badge" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center gap-1">
+                            <span>🔍</span> Level 2: Creative Explorer
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-300">The agent autonomously evolves its creative formulas and brainstorms unexpected viral suggestions for you.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-slate-400 font-mono">Creative Score: <strong class="text-indigo-400" id="evo-score">155</strong></span>
+                    <button onclick="surpriseMe()" id="btn-surprise" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 font-bold text-xs text-white shadow-lg transition flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" id="surprise-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        <span>✨ Surprise Me!</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dynamic Idea Cards Grid -->
+            <div id="sparks-container" class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                <div class="text-xs text-slate-400 p-4 text-center col-span-3">Brainstorming initial surprise sparks...</div>
+            </div>
+        </section>
+
+        <!-- Action Control Deck & Story Hot-Drop Studio Grid -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- Left Deck: 1-Click Operations (5 cols) -->
+            <div class="lg:col-span-5 space-y-4">
+                <div class="glass p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <span>⚡</span> Instant Operations
+                    </h3>
+                    <div class="space-y-2.5">
+                        <button onclick="triggerShorts()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-rose-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">🚀</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-rose-400">Generate Trilingual Shorts</div>
+                                    <div class="text-[10px] text-slate-400">English, Hindi & Gujarati in 1 prompt</div>
+                                </div>
+                            </div>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-300">Run →</span>
+                        </button>
+
+                        <button onclick="triggerPending()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">📤</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-amber-400">Upload Pending Shorts</div>
+                                    <div class="text-[10px] text-slate-400">Scans output/ and publishes to YouTube</div>
+                                </div>
+                            </div>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-300">Sync →</span>
+                        </button>
+
+                        <button onclick="triggerSocialPending()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-blue-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">🔄</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-blue-400">Retry Stored Social Stories</div>
+                                    <div class="text-[10px] text-slate-400" id="social-pending-desc">Auto-retries Instagram, Facebook & WhatsApp</div>
+                                </div>
+                            </div>
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400" id="social-pending-badge">0 Pending</span>
+                        </button>
+
+                        <button onclick="triggerSecurity()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">🛡️</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-emerald-400">Security Audit & Harden</div>
+                                    <div class="text-[10px] text-slate-400">5-point threat scan & permission lock</div>
+                                </div>
+                            </div>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-300">Audit →</span>
+                        </button>
+
+                        <button onclick="triggerCleaner()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-purple-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">🧹</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-purple-400">1-Click Stuck Video Cleaner</div>
+                                    <div class="text-[10px] text-slate-400" id="cleaner-stat-desc">Purges stuck processing drafts (Auto-runs daily)</div>
+                                </div>
+                            </div>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-300" id="cleaner-badge">Clean →</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cloud & Laptop Status Info -->
+                <div class="glass p-4 rounded-2xl border border-slate-800/80 space-y-2 text-xs text-slate-400">
+                    <div class="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <span>☁️</span> 24/7 Cloud Architecture Active
+                    </div>
+                    <p class="text-[11px] leading-relaxed">
+                        Even if your laptop is powered off, scheduled daily uploads at 10:00 AM, hourly pulses, and festive campaigns continue executing autonomously on this host.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Right Deck: Mobile Story Hot-Drop Studio (7 cols) -->
+            <div class="lg:col-span-7">
+                <div class="glass p-5 rounded-2xl border border-slate-800 space-y-4 glow-red">
+                    <div class="flex items-center justify-between">
+                        <div class="space-y-0.5">
+                            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                <span>📲</span> Mobile Story Studio (Hot-Drop)
+                            </h3>
+                            <p class="text-xs text-slate-400">Pick any photo/video from your phone to publish on Instagram, Facebook & WhatsApp!</p>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg">Instant</span>
+                    </div>
+
+                    <form id="story-upload-form" onsubmit="handleStoryUpload(event)" class="space-y-4">
+                        <!-- File Drop Zone -->
+                        <div id="drop-zone" onclick="document.getElementById('story-file').click()" class="border-2 border-dashed border-slate-700 hover:border-rose-500/60 rounded-xl p-6 text-center cursor-pointer transition bg-slate-900/50 hover:bg-slate-900/80 space-y-2">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center mx-auto text-xl">
+                                📷
+                            </div>
+                            <div class="text-xs font-semibold text-slate-300" id="file-label">
+                                Tap to select photo or video from phone
+                            </div>
+                            <p class="text-[10px] text-slate-500">Supports JPG, PNG, MP4, MOV up to 100MB</p>
+                            <input type="file" id="story-file" accept="image/*,video/*" class="hidden" onchange="handleFileSelected(event)" required>
+                        </div>
+
+                        <!-- Caption Input -->
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">Story Caption / Details (Optional)</label>
+                            <input type="text" id="story-caption" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 text-xs" placeholder="e.g. Pure Royal Enfield Heritage! Best service at Chamunda Auto.">
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button type="submit" id="story-upload-btn" class="w-full py-3 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:from-rose-500 hover:to-amber-400 font-bold text-xs text-white shadow-xl transition duration-150 flex items-center justify-center gap-2">
+                            <span>🚀</span> Publish Story to IG, FB & WhatsApp
+                        </button>
+
+                        <!-- Progress Bar (hidden by default) -->
+                        <div id="upload-progress-container" class="hidden space-y-1">
+                            <div class="flex justify-between text-[11px] text-slate-400">
+                                <span>Uploading to Agent Story/ folder...</span>
+                                <span id="upload-pct">0%</span>
+                            </div>
+                            <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                                <div id="upload-bar" class="h-full bg-rose-500 transition-all duration-150 w-0"></div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- Live Subsystem Telemetry & Logs -->
+        <section class="glass p-5 rounded-2xl border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>📋</span> Real-Time Activity & Security Log
+                </h3>
+                <span class="text-[10px] text-slate-500 font-mono" id="log-time">Updated just now</span>
+            </div>
+            <div id="log-terminal" class="w-full h-44 sm:h-52 bg-slate-950 p-3.5 rounded-xl border border-slate-850 font-mono text-[11px] text-slate-300 overflow-y-auto space-y-1">
+                <div class="text-slate-500">[System] Connecting to agent telemetry stream...</div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- App Logic Scripts -->
+    <script>
+        const AUTH_KEY = 'agent_auth_token';
+
+        function showToast(msg, icon = 'ℹ️') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            document.getElementById('toast-icon').innerText = icon;
+            toast.classList.remove('translate-y-[-100px]', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-[-100px]', 'opacity-0');
+            }, 3500);
+        }
+
+        function getAuthToken() {
+            return localStorage.getItem(AUTH_KEY) || '';
+        }
+
+        function checkAuth() {
+            if (!getAuthToken()) {
+                document.getElementById('auth-modal').classList.remove('hidden');
+            } else {
+                document.getElementById('auth-modal').classList.add('hidden');
+                refreshData();
+            }
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const pwd = document.getElementById('auth-password').value;
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({password: pwd})
+                });
+                const data = await res.json();
+                if (data.status === 'OK') {
+                    localStorage.setItem(AUTH_KEY, data.token);
+                    document.getElementById('auth-modal').classList.add('hidden');
+                    document.getElementById('auth-error').classList.add('hidden');
+                    showToast('Access Granted! Welcome back.', '✅');
+                    refreshData();
+                } else {
+                    document.getElementById('auth-error').classList.remove('hidden');
+                }
+            } catch (err) {
+                document.getElementById('auth-error').innerText = 'Connection error. Check server.';
+                document.getElementById('auth-error').classList.remove('hidden');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem(AUTH_KEY);
+            checkAuth();
+        }
+
+        async function apiFetch(endpoint, method = 'GET', body = null) {
+            const token = getAuthToken();
+            const opts = {
+                method,
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            };
+            if (body && !(body instanceof FormData)) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            } else if (body) {
+                opts.body = body;
+            }
+            const res = await fetch(endpoint, opts);
+            if (res.status === 401) {
+                logout();
+                throw new Error('Unauthorized');
+            }
+            return res.json();
+        }
+
+        async function refreshData() {
+            const icon = document.getElementById('refresh-icon');
+            icon.classList.add('animate-spin');
+
+            try {
+                const data = await apiFetch('/api/status');
+                
+                // Update UI badges
+                if (data.model) document.getElementById('stat-model').innerText = data.model;
+                
+                // YouTube
+                const ytElem = document.getElementById('stat-youtube');
+                if (data.youtube && data.youtube.authenticated) {
+                    ytElem.innerText = 'Connected';
+                    ytElem.className = 'text-sm sm:text-base font-bold text-emerald-400';
+                } else {
+                    ytElem.innerText = 'Login Ready';
+                    ytElem.className = 'text-sm sm:text-base font-bold text-amber-400';
+                }
+                document.getElementById('stat-yt-details').innerText = `Target: ${data.youtube ? data.youtube.privacy.toUpperCase() : 'UNLISTED'}`;
+
+                // Social
+                const socElem = document.getElementById('stat-social');
+                if (data.social && data.social.browser_session_ready) {
+                    socElem.innerText = 'Connected';
+                    socElem.className = 'text-sm sm:text-base font-bold text-emerald-400';
+                } else {
+                    socElem.innerText = 'Pending Setup';
+                    socElem.className = 'text-sm sm:text-base font-bold text-amber-400';
+                }
+
+                // Security
+                const secElem = document.getElementById('stat-security');
+                if (data.security && data.security.status === 'SECURE') {
+                    secElem.innerText = 'SECURE (0 Threats)';
+                    secElem.className = 'text-sm sm:text-base font-bold text-emerald-400';
+                } else {
+                    secElem.innerText = data.security ? data.security.status : 'AUDIT PENDING';
+                    secElem.className = 'text-sm sm:text-base font-bold text-amber-400';
+                }
+
+                // Festival
+                if (data.festival) {
+                    document.getElementById('festival-indicator').innerText = 
+                        `Next Festival Campaign: ${data.festival.name} (${data.festival.date})`;
+                }
+
+                // Evolution & Surprise Sparks
+                if (data.evolution) {
+                    if (data.evolution.level_name) {
+                        document.getElementById('evo-level-badge').innerHTML = `<span>🌟</span> ${escapeHtml(data.evolution.level_name)}`;
+                    }
+                    if (data.evolution.creative_score !== undefined) {
+                        document.getElementById('evo-score').innerText = data.evolution.creative_score;
+                    }
+                    if (data.evolution.sparks && data.evolution.sparks.length > 0) {
+                        renderSparks(data.evolution.sparks);
+                    }
+                }
+
+                // Stored Social Queue
+                if (data.social_queue) {
+                    const badge = document.getElementById('social-pending-badge');
+                    const desc = document.getElementById('social-pending-desc');
+                    const count = data.social_queue.pending_count || 0;
+                    if (badge) {
+                        badge.innerText = count > 0 ? `${count} Pending` : 'All Done';
+                        badge.className = count > 0 
+                            ? 'text-xs px-2 py-0.5 rounded-full bg-amber-950/70 text-amber-300 font-bold border border-amber-700/60 animate-pulse' 
+                            : 'text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400';
+                    }
+                    if (desc && count > 0) {
+                        desc.innerText = `${count} item(s) awaiting hourly retry on IG/FB/WA`;
+                    }
+                }
+
+                // Daily 1-Click Cleaner Status
+                if (data.cleaner) {
+                    const desc = document.getElementById('cleaner-stat-desc');
+                    const badge = document.getElementById('cleaner-badge');
+                    if (badge && data.cleaner.status) {
+                        badge.innerText = data.cleaner.status;
+                        badge.className = data.cleaner.status.includes('Cleaned') 
+                            ? 'text-xs px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-700/60 font-semibold'
+                            : 'text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300';
+                    }
+                    if (desc && data.cleaner.last_run_date) {
+                        desc.innerText = `Auto-run daily. Last: ${data.cleaner.last_run_date} (${data.cleaner.status})`;
+                    }
+                }
+
+                // Logs
+                if (data.logs && data.logs.length > 0) {
+                    const terminal = document.getElementById('log-terminal');
+                    terminal.innerHTML = data.logs.map(l => `<div class="py-0.5">${escapeHtml(l)}</div>`).join('');
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+
+                document.getElementById('log-time').innerText = new Date().toLocaleTimeString();
+
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setTimeout(() => icon.classList.remove('animate-spin'), 600);
+            }
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        function renderSparks(sparks) {
+            const container = document.getElementById('sparks-container');
+            if (!sparks || sparks.length === 0) {
+                container.innerHTML = '<div class="text-xs text-slate-400 p-4 text-center col-span-3">No active sparks. Click "Surprise Me!" to brainstorm!</div>';
+                return;
+            }
+
+            container.innerHTML = sparks.map((s, idx) => {
+                let badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+                let icon = '🚀';
+                if (s.category === 'royal_enfield') {
+                    badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+                    icon = '🏍️';
+                } else if (s.category === 'wildcard') {
+                    badgeColor = 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+                    icon = '⚡';
+                }
+
+                return `
+                    <div class="glass p-4 rounded-xl border border-slate-800 hover:border-indigo-500/50 transition duration-150 flex flex-col justify-between space-y-3 bg-slate-900/60">
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeColor} uppercase tracking-wider flex items-center gap-1">
+                                    <span>${icon}</span> ${escapeHtml((s.category || 'Mindset').replace('_', ' '))}
+                                </span>
+                                <span class="text-[10px] text-slate-400 font-mono">Idea #${idx+1}</span>
+                            </div>
+                            <h4 class="text-xs sm:text-sm font-bold text-white leading-snug">${escapeHtml(s.title)}</h4>
+                            <p class="text-[11px] text-slate-300 leading-relaxed">${escapeHtml(s.concept)}</p>
+                            <div class="p-2 rounded-lg bg-slate-950/70 border border-slate-800 text-[10px] space-y-0.5">
+                                <strong class="text-indigo-400 uppercase tracking-wider text-[9px] block">✨ Surprise Factor:</strong>
+                                <span class="text-slate-300 italic">${escapeHtml(s.surprise_factor)}</span>
+                            </div>
+                        </div>
+
+                        <button onclick="executeSpark('${escapeHtml(s.id)}', '${escapeHtml(s.title).replace(/'/g, "\\'")}')" class="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-indigo-600 via-purple-600 to-rose-600 hover:from-indigo-500 hover:to-rose-500 text-white font-bold text-[11px] shadow-md transition duration-150 flex items-center justify-center gap-1.5">
+                            <span>🚀</span> Bring This Idea to Life
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function surpriseMe() {
+            const btn = document.getElementById('btn-surprise');
+            const icon = document.getElementById('surprise-icon');
+            btn.disabled = true;
+            icon.classList.add('animate-spin');
+            showToast('Brainstorming unexpected creative breakthroughs...', '💡');
+
+            try {
+                const data = await apiFetch('/api/evolution/surprise', 'POST');
+                if (data.status === 'OK') {
+                    if (data.level_name) {
+                        document.getElementById('evo-level-badge').innerHTML = `<span>🌟</span> ${escapeHtml(data.level_name)}`;
+                    }
+                    if (data.creative_score !== undefined) {
+                        document.getElementById('evo-score').innerText = data.creative_score;
+                    }
+                    if (data.sparks) {
+                        renderSparks(data.sparks);
+                    }
+                    showToast(data.message || 'New surprise sparks formulated!', '✨');
+                }
+            } catch (err) {
+                showToast('Brainstorming error. Retrying...', '❌');
+            } finally {
+                btn.disabled = false;
+                icon.classList.remove('animate-spin');
+            }
+        }
+
+        async function executeSpark(sparkId, sparkTitle) {
+            showToast(`Engaging AI creation for: '${sparkTitle}'...`, '⏳');
+            try {
+                const res = await apiFetch('/api/evolution/execute', 'POST', {spark_id: sparkId});
+                showToast(res.message || 'Creative execution launched!', '🎉');
+                setTimeout(refreshData, 2500);
+            } catch (err) {
+                showToast('Execution error. Please retry.', '❌');
+            }
+        }
+
+        async function triggerShorts() {
+            showToast('Triggering Trilingual Shorts generation...', '⏳');
+            try {
+                const res = await apiFetch('/api/trigger/shorts', 'POST');
+                showToast(res.message || 'Pipeline started in background!', '🚀');
+                setTimeout(refreshData, 2000);
+            } catch (e) {
+                showToast('Failed to trigger pipeline', '❌');
+            }
+        }
+
+        async function triggerFestival() {
+            showToast('Triggering Chamunda Automobile Festival Campaign...', '⏳');
+            try {
+                const res = await apiFetch('/api/trigger/festival', 'POST');
+                showToast(res.message || 'Festival campaign engaged!', '🎉');
+                setTimeout(refreshData, 2000);
+            } catch (e) {
+                showToast('Failed to trigger festival campaign', '❌');
+            }
+        }
+
+        async function triggerPending() {
+            showToast('Checking and uploading pending YouTube videos...', '⏳');
+            try {
+                const res = await apiFetch('/api/trigger/pending', 'POST');
+                showToast(res.message || 'Pending upload completed!', '📤');
+                setTimeout(refreshData, 2000);
+            } catch (e) {
+                showToast('Pending check failed', '❌');
+            }
+        }
+
+        async function triggerSocialPending() {
+            showToast('Retrying stored social stories on Instagram, Facebook & WhatsApp...', '⏳');
+            try {
+                const res = await apiFetch('/api/social/retry_pending', 'POST');
+                showToast(res.message || 'Pending social retry initiated!', '🔄');
+                setTimeout(refreshData, 2500);
+            } catch (e) {
+                showToast('Social retry request failed', '❌');
+            }
+        }
+
+        async function triggerSecurity() {
+            showToast('Running comprehensive 5-point cybersecurity audit...', '⏳');
+            try {
+                const res = await apiFetch('/api/trigger/security', 'POST');
+                showToast(`Security Audit: ${res.overall_status || 'COMPLETE'}!`, '🛡️');
+                setTimeout(refreshData, 1500);
+            } catch (e) {
+                showToast('Security audit failed', '❌');
+            }
+        }
+
+        async function triggerCleaner() {
+            showToast('Scanning channel & purging stuck processing videos...', '🧹');
+            try {
+                const res = await apiFetch('/api/trigger/cleaner', 'POST');
+                showToast(res.message || '1-Click Cleaner initiated in background!', '🎉');
+                setTimeout(refreshData, 3000);
+            } catch (e) {
+                showToast('Failed to trigger 1-Click Cleaner', '❌');
+            }
+        }
+
+        function handleFileSelected(e) {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('file-label').innerHTML = `<span class="text-emerald-400 font-bold">Selected:</span> ${file.name} (${(file.size/1024/1024).toFixed(2)} MB)`;
+            }
+        }
+
+        async function handleStoryUpload(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('story-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                showToast('Please select a photo or video first', '⚠️');
+                return;
+            }
+
+            const caption = document.getElementById('story-caption').value;
+            const formData = new FormData();
+            formData.append('media', file);
+            formData.append('caption', caption);
+
+            const btn = document.getElementById('story-upload-btn');
+            const progressContainer = document.getElementById('upload-progress-container');
+            const progressBar = document.getElementById('upload-bar');
+            const progressPct = document.getElementById('upload-pct');
+
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '30%';
+            progressPct.innerText = '30%';
+
+            try {
+                progressBar.style.width = '70%';
+                progressPct.innerText = '70%';
+
+                const res = await apiFetch('/api/upload/story', 'POST', formData);
+
+                progressBar.style.width = '100%';
+                progressPct.innerText = '100%';
+
+                showToast('🎉 Media uploaded to Story/! Auto-uploader publishing to IG, FB & WA...', '🚀');
+                
+                // Reset form
+                fileInput.value = '';
+                document.getElementById('story-caption').value = '';
+                document.getElementById('file-label').innerText = 'Tap to select photo or video from phone';
+
+                setTimeout(() => {
+                    progressContainer.classList.add('hidden');
+                    progressBar.style.width = '0%';
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    refreshData();
+                }, 2000);
+
+            } catch (err) {
+                showToast('Upload error. Please retry.', '❌');
+                progressContainer.classList.add('hidden');
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // Auto refresh every 20 seconds
+        setInterval(refreshData, 20000);
+        window.addEventListener('load', checkAuth);
+    </script>
+</body>
+</html>
