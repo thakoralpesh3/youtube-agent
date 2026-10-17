@@ -94,7 +94,7 @@ jobs:
         env:
           NON_INTERACTIVE: "1"
         run: |
-          CMD_ARGS="--trilingual --force"
+          CMD_ARGS="--trilingual --force --platform youtube"
 
           # Determine content type
           CONTENT_TYPE="${{ github.event.inputs.content_type || 'both' }}"
