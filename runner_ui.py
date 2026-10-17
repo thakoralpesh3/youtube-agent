@@ -537,6 +537,13 @@ def run_pipeline():
                     try:
                         auth.get_credentials()
                         console.print("[bold green]✅ YouTube authentication successful![/bold green]")
+                        try:
+                            from core.github_sync import sync_secrets_to_github
+                            sec_res = sync_secrets_to_github()
+                            if sec_res.get("status") == "SUCCESS":
+                                console.print("[bold green]🔐 GitHub Actions Secrets synced automatically![/bold green]")
+                        except Exception:
+                            pass
                     except Exception as e:
                         console.print(f"[bold red]❌ YouTube Auth error:[/bold red] {e}")
                 elif auth_choice == "2":
