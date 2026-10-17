@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -262,11 +262,51 @@ def sync_to_github(
     return {"status": "COMMITTED", "message": commit_msg}
 
 
+def sync_secrets_to_github() -> Dict[str, Any]:
+    """Syncs GEMINI_API_KEY, client_secret.json, and token.json to GitHub repository secrets."""
+    remotes = get_remote_info()
+    repo_url = remotes.get("origin", "")
+    match = re.search(r"github\.com[:/]([^/]+/[^/.]+)", repo_url)
+    if not match:
+        return {"status": "ERROR", "error": "Could not determine GitHub repository from remote URL."}
+    repo_slug = match.group(1).removesuffix(".git")
+
+    synced = []
+    # 1. GEMINI_API_KEY
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key and (PROJECT_ROOT / ".env").exists():
+        for line in (PROJECT_ROOT / ".env").read_text(encoding="utf-8").splitlines():
+            if line.startswith("GEMINI_API_KEY="):
+                gemini_key = line.split("=", 1)[1].strip()
+                break
+    if gemini_key:
+        proc = subprocess.run(["gh", "secret", "set", "GEMINI_API_KEY", "-b", gemini_key, "-R", repo_slug], capture_output=True, text=True)
+        if proc.returncode == 0:
+            synced.append("GEMINI_API_KEY")
+
+    # 2. YOUTUBE_CLIENT_SECRET_JSON
+    cs_file = PROJECT_ROOT / "client_secret.json"
+    if cs_file.exists():
+        proc = subprocess.run(["gh", "secret", "set", "YOUTUBE_CLIENT_SECRET_JSON", "-R", repo_slug], input=cs_file.read_text(encoding="utf-8"), text=True, capture_output=True)
+        if proc.returncode == 0:
+            synced.append("YOUTUBE_CLIENT_SECRET_JSON")
+
+    # 3. YOUTUBE_TOKEN_JSON
+    tk_file = PROJECT_ROOT / "token.json"
+    if tk_file.exists():
+        proc = subprocess.run(["gh", "secret", "set", "YOUTUBE_TOKEN_JSON", "-R", repo_slug], input=tk_file.read_text(encoding="utf-8"), text=True, capture_output=True)
+        if proc.returncode == 0:
+            synced.append("YOUTUBE_TOKEN_JSON")
+
+    return {"status": "SUCCESS", "synced": synced, "repo": repo_slug}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Antigravity to GitHub Synchronization Tool")
     parser.add_argument("-m", "--message", type=str, default=None, help="Commit message")
     parser.add_argument("--set-remote", type=str, default=None, help="Set GitHub remote repository URL")
     parser.add_argument("--status", action="store_true", help="Display git status and remote configuration")
+    parser.add_argument("--sync-secrets", action="store_true", help="Sync local credentials to GitHub repository secrets")
     parser.add_argument("--no-push", action="store_true", help="Commit locally without pushing to GitHub")
     parser.add_argument("--branch", type=str, default="main", help="Git branch (default: main)")
     parser.add_argument("--remote", type=str, default="origin", help="Git remote name (default: origin)")
@@ -277,6 +317,18 @@ def main():
         if not is_git_initialized():
             init_repository(branch=args.branch)
         set_remote_url(args.set_remote, remote_name=args.remote)
+    if args.sync_secrets:
+        print("\n" + "=" * 60)
+        print("🔐 SYNCING LOCAL SECRETS TO GITHUB REPOSITORY SECRETS")
+        print("=" * 60)
+        res = sync_secrets_to_github()
+        if res.get("status") == "SUCCESS":
+            print(f"✅ Repository : {res.get('repo')}")
+            for s in res.get("synced", []):
+                print(f"  ✓ Secret updated: {s}")
+        else:
+            print(f"❌ Error: {res.get('error')}")
+        print("=" * 60 + "\n")
         return
 
     if args.status:
