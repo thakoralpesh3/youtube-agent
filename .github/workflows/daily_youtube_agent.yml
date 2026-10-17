@@ -81,18 +81,20 @@ jobs:
             echo "✅ client_secret.json restored from GitHub Secrets"
           fi
 
-          # 3. Restore output/token.json if secret is configured
+          # 3. Restore token.json to root and output/ if secret is configured
           mkdir -p output
           if [ -n "$YOUTUBE_TOKEN_JSON" ]; then
+            echo "$YOUTUBE_TOKEN_JSON" > token.json
             echo "$YOUTUBE_TOKEN_JSON" > output/token.json
-            echo "✅ output/token.json restored from GitHub Secrets"
+            echo "YOUTUBE_TOKEN_FILE=token.json" >> .env
+            echo "✅ token.json restored to root and output/ from GitHub Secrets"
           fi
 
       - name: Execute Autonomous YouTube Content Creator Agent
         env:
           NON_INTERACTIVE: "1"
         run: |
-          CMD_ARGS="--force"
+          CMD_ARGS="--trilingual --force"
 
           # Determine content type
           CONTENT_TYPE="${{ github.event.inputs.content_type || 'both' }}"

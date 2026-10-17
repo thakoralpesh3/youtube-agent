@@ -2,7 +2,8 @@
 # Quick CLI Shortcut: Sync all Antigravity changes to GitHub
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 PYTHON_EXEC="$SCRIPT_DIR/.venv/bin/python3"
 
 if [ ! -f "$PYTHON_EXEC" ]; then
