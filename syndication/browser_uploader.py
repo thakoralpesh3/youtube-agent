@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import subprocess
@@ -6,12 +8,22 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+try:
+    from selenium import webdriver
+    from selenium.webdriver.firefox.options import Options
+    from selenium.webdriver.firefox.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    HAS_SELENIUM = True
+except ImportError:
+    webdriver = None
+    Options = None
+    Service = None
+    By = None
+    WebDriverWait = None
+    EC = None
+    HAS_SELENIUM = False
 
 import config
 from syndication.social_auth import SocialAuth
@@ -233,6 +245,8 @@ class BrowserUploader:
 
     def get_driver(self, headless: Optional[bool] = None, viewport: tuple = (1366, 768)) -> webdriver.Firefox:
         """Initializes a Firefox driver with the persistent profile."""
+        if not HAS_SELENIUM:
+            raise RuntimeError("Selenium is required for browser automation but is not installed.")
         if headless is None:
             headless = os.getenv("HEADLESS_BROWSER", "1") == "1"
 
