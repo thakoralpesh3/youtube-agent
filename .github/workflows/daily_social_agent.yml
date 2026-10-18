@@ -26,6 +26,10 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   run-social-agent:
     name: Execute Daily Social Media Story Creation & Publishing
@@ -35,6 +39,23 @@ jobs:
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
+
+      - name: Deduplicate Scheduled Execution
+        id: deduplicate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Checking if daily Social Media workflow already executed today..."
+          TODAY=$(date -u +%Y-%m-%d)
+          PREV_SUCCESS=$(gh run list --workflow=daily_social_agent.yml -s success --json createdAt,databaseId --jq ".[] | select(.databaseId != ${{ github.run_id }} and (.createdAt | startswith(\"$TODAY\"))) | .databaseId" | head -n 1 || true)
+          if [ -n "$PREV_SUCCESS" ]; then
+            echo "✨ Daily Social Media run already completed today (Run ID: $PREV_SUCCESS). Skipping delayed schedule."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "✅ No prior run today. Proceeding with daily story publishing."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -81,6 +102,7 @@ jobs:
           fi
 
       - name: Verify Social Account Connection & Diagnostics
+        if: steps.deduplicate.outputs.skip != 'true'
         run: |
           python3 -c "
           from syndication.social_auth import SocialAuth
@@ -95,6 +117,7 @@ jobs:
           "
 
       - name: Execute Autonomous Social Media Stories Agent
+        if: steps.deduplicate.outputs.skip != 'true'
         env:
           NON_INTERACTIVE: "1"
         run: |

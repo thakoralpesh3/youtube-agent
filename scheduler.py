@@ -20,6 +20,53 @@ _YOUTUBE_RUN_LOCK = threading.Lock()
 _SOCIAL_RUN_LOCK = threading.Lock()
 
 
+def dispatch_github_workflow(
+    workflow_name: str = "daily_youtube_agent.yml",
+    repo: str = None,
+    inputs: dict = None,
+) -> bool:
+    """
+    Directly dispatches a GitHub Actions workflow via the GitHub CLI ('gh').
+    Triggers immediate cloud execution (~10-30s start time), bypassing
+    the multi-hour delays caused by GitHub Actions free-tier cron queuing.
+    """
+    import shutil
+    import subprocess
+
+    target_repo = repo or getattr(config, "GITHUB_REPO", "thakoralpesh3/youtube-agent")
+    gh_path = shutil.which("gh")
+    if not gh_path:
+        logger.warning("⚠️ [GitHub Cloud Dispatch] GitHub CLI ('gh') not found in PATH.")
+        return False
+
+    cmd = [gh_path, "workflow", "run", workflow_name, "-R", target_repo]
+    if inputs:
+        for k, v in inputs.items():
+            cmd.extend(["-f", f"{k}={v}"])
+
+    try:
+        logger.info(f"🚀 [GitHub Cloud Dispatch] Dispatching workflow '{workflow_name}' on '{target_repo}'...")
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if res.returncode == 0:
+            logger.info(f"✅ [GitHub Cloud Dispatch] Successfully dispatched '{workflow_name}' on GitHub Actions!")
+            try:
+                from growth.notifier import notifier
+                notifier.send(
+                    "🚀 Cloud Agent Dispatched",
+                    f"Workflow '{workflow_name}' triggered on GitHub Actions without cron delay!",
+                    urgency="normal",
+                )
+            except Exception:
+                pass
+            return True
+        else:
+            logger.error(f"❌ [GitHub Cloud Dispatch] Failed to dispatch workflow '{workflow_name}': {res.stderr.strip()}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ [GitHub Cloud Dispatch] Error executing gh workflow run: {e}")
+        return False
+
+
 def run_daily_social_worker(force: bool = False):
     """
     Sharp 11:30 PM Social Media Daily Publishing Worker:
@@ -236,7 +283,35 @@ def run_daily_pipelines_if_needed(force: bool = False, background: bool = True):
 
 
 def job():
-    logger.info(f"⏰ Daily trigger activated at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    upload_time = getattr(config, "DAILY_UPLOAD_TIME", "09:00")
+    logger.info(f"⏰ Daily trigger activated at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (Scheduled: {upload_time} IST)")
+
+    # Zero-delay GitHub Actions Cloud Dispatch
+    cloud_dispatch = getattr(config, "DISPATCH_TO_GITHUB_ACTIONS", True)
+    if cloud_dispatch:
+        try:
+            from growth.youtube_daily_limiter import youtube_limiter
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            if not youtube_limiter.can_run_today():
+                logger.info(f"✨ [09:00 AM Trigger] YouTube Agent already ran today ({today_str}). Standing by for tomorrow.")
+                return
+
+            workflow = getattr(config, "GITHUB_YOUTUBE_WORKFLOW", "daily_youtube_agent.yml")
+            repo = getattr(config, "GITHUB_REPO", "thakoralpesh3/youtube-agent")
+            logger.info("=" * 65)
+            logger.info(f"🚀 [09:00 AM Sharp Trigger] Dispatching YouTube Agent to GitHub Actions ({workflow})...")
+            logger.info("   Zero delay: Starts immediately on GitHub cloud runner without cron queue wait!")
+            logger.info("=" * 65)
+            success = dispatch_github_workflow(workflow_name=workflow, repo=repo)
+            if success:
+                youtube_limiter.record_run(topic="github_actions_cloud_dispatch", run_id="cloud_dispatch")
+                logger.info("✅ [09:00 AM Sharp Trigger] Cloud run dispatched. Daily YouTube limit recorded.")
+                return
+            else:
+                logger.warning("⚠️ [09:00 AM Sharp Trigger] GitHub Actions dispatch failed. Falling back to local execution...")
+        except Exception as err:
+            logger.warning(f"⚠️ [09:00 AM Sharp Trigger] Notice during cloud dispatch: {err}")
+
     run_daily_pipelines_if_needed(force=False, background=True)
 
 
@@ -445,20 +520,21 @@ def run_daily_scheduler():
     except Exception as e:
         logger.debug(f"Telegram bot start notice: {e}")
 
-    # Schedule daily sequential execution: YouTube Agent (10:00 AM IST)
+    # Schedule daily sharp 09:00 AM YouTube execution (Zero-delay GitHub Cloud Dispatch)
     schedule.every().day.at(upload_time).do(job)
+    logger.info(f"🎬 [Daily YouTube Agent] Scheduled daily at sharp {upload_time} IST (Zero-delay GitHub Actions Cloud Dispatch)")
 
     # Schedule daily sharp 11:30 PM Social Publishing (Instagram, Facebook & WhatsApp Stories)
     social_upload_time = getattr(config, "SOCIAL_DAILY_UPLOAD_TIME", "23:30")
     schedule.every().day.at(social_upload_time).do(
         lambda: threading.Thread(target=run_daily_social_worker, args=(False,), daemon=True, name="Daily1130PMSocialWorker").start()
     )
-    logger.info(f"📱 [Daily Social Agent] Scheduled daily at sharp {social_upload_time} (WhatsApp, Instagram & Facebook Stories)")
+    logger.info(f"📱 [Daily Social Agent] Scheduled daily at sharp {social_upload_time} IST (WhatsApp, Instagram & Facebook Stories)")
 
-    # Schedule daily 1-click YouTube stuck video cleaner (09:00 AM IST)
-    cleaner_time = getattr(config, "DAILY_CLEANER_TIME", "09:00")
+    # Schedule daily 1-click YouTube stuck video cleaner (09:30 AM IST)
+    cleaner_time = getattr(config, "DAILY_CLEANER_TIME", "09:30")
     schedule.every().day.at(cleaner_time).do(run_daily_youtube_cleaner)
-    logger.info(f"🧹 [Daily Cleaner] Scheduled daily at {cleaner_time} (1-Click Stuck Video Cleaner & Channel Auditor)")
+    logger.info(f"🧹 [Daily Cleaner] Scheduled daily at {cleaner_time} IST (1-Click Stuck Video Cleaner & Channel Auditor)")
 
     # Schedule hourly self-run (checks pending uploads & system health every 1 hour)
     schedule.every(1).hours.do(hourly_cycle)
@@ -479,9 +555,19 @@ def run_daily_scheduler():
         if yt_needed:
             logger.info(
                 f"🚀 [Startup Coordinator] Laptop started! YouTube action required (can_run: {youtube_limiter.can_run_today()}, "
-                f"leftovers: {has_leftover_yt}). Launching sequential coordinator..."
+                f"leftovers: {has_leftover_yt}). Coordinating daily execution..."
             )
-            run_daily_pipelines_if_needed(force=False, background=True)
+            cloud_dispatch = getattr(config, "DISPATCH_TO_GITHUB_ACTIONS", True)
+            if cloud_dispatch and youtube_limiter.can_run_today():
+                workflow = getattr(config, "GITHUB_YOUTUBE_WORKFLOW", "daily_youtube_agent.yml")
+                repo = getattr(config, "GITHUB_REPO", "thakoralpesh3/youtube-agent")
+                logger.info(f"🚀 [Startup Coordinator] Dispatching '{workflow}' to GitHub Actions...")
+                if dispatch_github_workflow(workflow_name=workflow, repo=repo):
+                    youtube_limiter.record_run(topic="github_actions_cloud_dispatch", run_id="startup_cloud_dispatch")
+                else:
+                    run_daily_pipelines_if_needed(force=False, background=True)
+            else:
+                run_daily_pipelines_if_needed(force=False, background=True)
         elif soc_needed:
             logger.info(
                 f"🚀 [Startup Coordinator] Laptop started after 11:30 PM and social upload pending! "

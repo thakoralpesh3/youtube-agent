@@ -157,6 +157,7 @@ def interactive_menu() -> tuple[str, Optional[str], Optional[str], bool, str]:
         console.print("  [bold cyan][S][/bold cyan] 🛡️  [bold white]Cybersecurity Sentinel & Anti-Hacker Shield[/bold white] (Audit & Harden)")
         console.print("  [bold cyan][E][/bold cyan] 💡 [bold white]AI Creative Evolution & Surprise Ideas[/bold white] (Brainstorm Breakthroughs)")
         console.print("  [bold cyan][R][/bold cyan] 🔄 [bold yellow]Retry Stored Social Stories[/bold yellow] (Auto-Retry Pending IG, FB & WA Stories)")
+        console.print("  [bold cyan][C][/bold cyan] ☁️  [bold yellow]Trigger Cloud Run on GitHub[/bold yellow] (Zero-delay GitHub Actions Cloud Dispatch)")
         console.print("  [bold cyan][G][/bold cyan] 🌐 [bold yellow]Sync Codebase to GitHub[/bold yellow] (Auto-Commit & Push All Antigravity Updates)")
         console.print("  [bold cyan][0][/bold cyan] 🚪 [bold dim]Exit[/bold dim]\n")
 
@@ -175,6 +176,8 @@ def interactive_menu() -> tuple[str, Optional[str], Optional[str], bool, str]:
             return "evolution", None, None, False, "all"
         if choice.strip().upper() == "R":
             return "retry_social", None, None, False, "social"
+        if choice.strip().upper() == "C":
+            return "cloud_dispatch", None, None, False, "all"
         if choice.strip().upper() == "G":
             return "sync_github", None, None, False, "all"
 
@@ -456,6 +459,51 @@ def handle_social_retry():
     input("\nPress Enter to continue...")
 
 
+def handle_cloud_dispatch():
+    console.clear()
+    console.print(
+        Panel.fit(
+            "[bold cyan]☁️ GITHUB ACTIONS CLOUD DISPATCH[/bold cyan]\n"
+            "[dim]Triggers instant cloud execution on GitHub Actions without cron queue delays.[/dim]",
+            border_style="cyan",
+        )
+    )
+    console.print("[bold yellow]Select Cloud Workflow to Trigger:[/bold yellow]")
+    console.print("  [bold cyan][1][/bold cyan] 🎬 Daily YouTube Agent (Trilingual Shorts + 16:9 Long Video)")
+    console.print("  [bold cyan][2][/bold cyan] 📱 Daily Social Media Agent (WhatsApp, Instagram & Facebook Stories)")
+    console.print("  [bold cyan][3][/bold cyan] 🧪 YouTube Dry Run Test (Generates videos in cloud without uploading)")
+    console.print("  [bold cyan][0][/bold cyan] 🚪 Cancel\n")
+
+    sel = Prompt.ask("👉 Select action", default="1")
+    if sel == "1":
+        from scheduler import dispatch_github_workflow
+        with console.status("[bold green]Dispatching Daily YouTube Agent to GitHub Actions..."):
+            success = dispatch_github_workflow("daily_youtube_agent.yml")
+        if success:
+            console.print("\n[bold green]✅ YouTube Agent dispatched successfully on GitHub Actions![/bold green]")
+        else:
+            console.print("\n[bold red]❌ Failed to dispatch workflow. Verify 'gh auth status'.[/bold red]")
+    elif sel == "2":
+        from scheduler import dispatch_github_workflow
+        with console.status("[bold green]Dispatching Daily Social Agent to GitHub Actions..."):
+            success = dispatch_github_workflow("daily_social_agent.yml")
+        if success:
+            console.print("\n[bold green]✅ Social Media Agent dispatched successfully on GitHub Actions![/bold green]")
+        else:
+            console.print("\n[bold red]❌ Failed to dispatch workflow. Verify 'gh auth status'.[/bold red]")
+    elif sel == "3":
+        from scheduler import dispatch_github_workflow
+        with console.status("[bold green]Dispatching YouTube Dry Run to GitHub Actions..."):
+            success = dispatch_github_workflow("daily_youtube_agent.yml", inputs={"dry_run": "true"})
+        if success:
+            console.print("\n[bold green]✅ Dry run dispatched successfully on GitHub Actions![/bold green]")
+        else:
+            console.print("\n[bold red]❌ Failed to dispatch dry run. Verify 'gh auth status'.[/bold red]")
+    elif sel == "0":
+        return
+    Prompt.ask("\nPress Enter to return")
+
+
 def run_pipeline():
     parser = argparse.ArgumentParser(description="YouTube Agent Runner UI")
     parser.add_argument("--platform", choices=["all", "youtube", "social"], default="all", help="Target platform: 'youtube' (YouTube only), 'social' (IG, FB, WA only), or 'all'")
@@ -627,6 +675,9 @@ def run_pipeline():
                 if res.get("error"):
                     console.print(f"[bold red]Notice:[/bold red] {res.get('error')}")
                 Prompt.ask("\nPress Enter to return")
+                return
+            elif action == "cloud_dispatch":
+                handle_cloud_dispatch()
                 return
             elif action == "trilingual":
                 is_trilingual = True

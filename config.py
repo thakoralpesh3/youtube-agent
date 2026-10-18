@@ -50,11 +50,17 @@ DEFAULT_NICHE = os.getenv(
     "High-Performance Growth Mindset, Stoicism, Health & Fitness Science, Mental Resilience, and Peak Daily Discipline (Strictly All-Ages & Family-Friendly)",
 )
 DEFAULT_CATEGORY_ID = os.getenv("YOUTUBE_CATEGORY_ID", "27")  # 27: Education, 26: Howto/Fitness, 22: People & Blogs
-DAILY_UPLOAD_TIME = os.getenv("DAILY_UPLOAD_TIME", "10:00")  # HH:MM format for YouTube
+DAILY_UPLOAD_TIME = os.getenv("DAILY_UPLOAD_TIME", "09:00")  # HH:MM format for YouTube (Sharp 09:00 AM IST)
 SOCIAL_DAILY_UPLOAD_TIME = os.getenv("SOCIAL_DAILY_UPLOAD_TIME", "23:30")  # Sharp 11:30 PM format for Social Stories (IG, FB, WA)
-DAILY_CLEANER_TIME = os.getenv("DAILY_CLEANER_TIME", "09:00")  # HH:MM format for daily stuck video cleaner
+DAILY_CLEANER_TIME = os.getenv("DAILY_CLEANER_TIME", "09:30")  # HH:MM format for daily stuck video cleaner
 SOCIAL_DAILY_POST_LIMIT = int(os.getenv("SOCIAL_DAILY_POST_LIMIT", "1"))  # Maximum 1 social post per day
 YOUTUBE_DAILY_RUN_LIMIT = int(os.getenv("YOUTUBE_DAILY_RUN_LIMIT", "1"))  # Maximum 1 YouTube run per day
+
+# GitHub Actions Cloud Dispatch Configuration (Zero-delay sharp dispatch)
+DISPATCH_TO_GITHUB_ACTIONS = os.getenv("DISPATCH_TO_GITHUB_ACTIONS", "true").lower() in ("1", "true", "yes")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "thakoralpesh3/youtube-agent")
+GITHUB_YOUTUBE_WORKFLOW = os.getenv("GITHUB_YOUTUBE_WORKFLOW", "daily_youtube_agent.yml")
+GITHUB_SOCIAL_WORKFLOW = os.getenv("GITHUB_SOCIAL_WORKFLOW", "daily_social_agent.yml")
 
 # Strict Content Safety & Age Appropriateness Policy (Under-18 Safe / All-Ages Family Friendly)
 STRICT_NO_18_PLUS = True

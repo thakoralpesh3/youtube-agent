@@ -26,6 +26,10 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   run-agent:
     name: Execute Daily YouTube Content Creation & Upload
@@ -35,6 +39,23 @@ jobs:
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
+
+      - name: Deduplicate Scheduled Execution
+        id: deduplicate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Checking if daily YouTube workflow already executed today..."
+          TODAY=$(date -u +%Y-%m-%d)
+          PREV_SUCCESS=$(gh run list --workflow=daily_youtube_agent.yml -s success --json createdAt,databaseId --jq ".[] | select(.databaseId != ${{ github.run_id }} and (.createdAt | startswith(\"$TODAY\"))) | .databaseId" | head -n 1 || true)
+          if [ -n "$PREV_SUCCESS" ]; then
+            echo "✨ Daily YouTube run already completed today (Run ID: $PREV_SUCCESS). Skipping delayed schedule."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "✅ No prior run today. Proceeding with daily upload."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -91,6 +112,7 @@ jobs:
           fi
 
       - name: Verify YouTube Channel Connection & Diagnostics
+        if: steps.deduplicate.outputs.skip != 'true'
         run: |
           python3 -c "
           from youtube.auth import YouTubeAuth
@@ -103,6 +125,7 @@ jobs:
           "
 
       - name: Execute Autonomous YouTube Content Creator Agent
+        if: steps.deduplicate.outputs.skip != 'true'
         env:
           NON_INTERACTIVE: "1"
         run: |
@@ -127,7 +150,7 @@ jobs:
           python3 agent.py $CMD_ARGS
 
       - name: Sweep & Auto-Upload Any Leftover Videos
-        if: success() || failure()
+        if: steps.deduplicate.outputs.skip != 'true' && (success() || failure())
         env:
           NON_INTERACTIVE: "1"
         run: |
