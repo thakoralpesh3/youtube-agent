@@ -87,14 +87,14 @@ class SocialAuth:
     def is_instagram_ready(self) -> bool:
         ig = self.data.get("instagram", {})
         browser = self.data.get("browser_session", {})
-        has_api = bool(ig.get("access_token") and ig.get("account_id"))
+        has_api = bool((ig.get("access_token") and ig.get("account_id")) or ig.get("sessionid"))
         has_browser = bool(browser.get("instagram_logged_in") or browser.get("first_setup_done"))
         return has_api or has_browser
 
     def is_facebook_ready(self) -> bool:
         fb = self.data.get("facebook", {})
         browser = self.data.get("browser_session", {})
-        has_api = bool(fb.get("page_access_token") and fb.get("page_id"))
+        has_api = bool((fb.get("page_access_token") and fb.get("page_id")) or fb.get("user_id") or fb.get("xs"))
         has_browser = bool(browser.get("facebook_logged_in") or browser.get("first_setup_done"))
         return has_api or has_browser
 
