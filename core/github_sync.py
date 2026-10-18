@@ -298,6 +298,13 @@ def sync_secrets_to_github() -> Dict[str, Any]:
         if proc.returncode == 0:
             synced.append("YOUTUBE_TOKEN_JSON")
 
+    # 4. SOCIAL_CREDENTIALS_JSON
+    soc_file = PROJECT_ROOT / "social_credentials.json"
+    if soc_file.exists():
+        proc = subprocess.run(["gh", "secret", "set", "SOCIAL_CREDENTIALS_JSON", "-R", repo_slug], input=soc_file.read_text(encoding="utf-8"), text=True, capture_output=True)
+        if proc.returncode == 0:
+            synced.append("SOCIAL_CREDENTIALS_JSON")
+
     return {"status": "SUCCESS", "synced": synced, "repo": repo_slug}
 
 
