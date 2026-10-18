@@ -90,6 +90,18 @@ jobs:
             echo "✅ token.json restored to root and output/ from GitHub Secrets"
           fi
 
+      - name: Verify YouTube Channel Connection & Diagnostics
+        run: |
+          python3 -c "
+          from youtube.auth import YouTubeAuth
+          auth = YouTubeAuth()
+          if auth.is_token_valid():
+              ch = auth.verify_channel()
+              print(f'🎉 YouTube Channel Connected: {ch.get(\"title\")} ({ch.get(\"subscribers\")} subscribers, {ch.get(\"videos\")} videos)')
+          else:
+              print('⚠️ YouTube token validation notice. Agent will generate and queue content safely.')
+          "
+
       - name: Execute Autonomous YouTube Content Creator Agent
         env:
           NON_INTERACTIVE: "1"
