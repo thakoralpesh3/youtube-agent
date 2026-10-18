@@ -137,10 +137,16 @@ class YouTubeAgent:
         logger.info(f"✨ Standard Video Title: {script.title}")
         logger.info(f"📜 Total Chapters/Scenes: {len(script.scenes)}")
 
-        # 2. Synthesize Audio for all scenes
+        # 2. Synthesize Audio for all scenes (isolated in audio_long)
         report(20, "Synthesizing voiceover narration for all chapters (Edge-TTS)...", 6)
         scene_dicts = [s.model_dump() for s in script.scenes]
-        audios = self.audio_gen.generate_scene_audios(scene_dicts, run_dir, lang="en")
+        audios = self.audio_gen.generate_scene_audios(
+            scene_dicts,
+            run_dir,
+            lang="en",
+            subfolder="audio_long",
+            orientation="landscape",
+        )
         report(40, f"Voiceover synthesized for {len(audios)} chapters", 6)
 
         # 3. Generate 16:9 Landscape Visuals
@@ -359,7 +365,14 @@ class YouTubeAgent:
             pct = 20 + int((curr / tot) * 20)
             report(pct, msg, 2)
 
-        scene_audios = self.audio_gen.generate_scene_audios(scene_dicts, run_dir, callback=audio_sub_cb)
+        scene_audios = self.audio_gen.generate_scene_audios(
+            scene_dicts,
+            run_dir,
+            lang="en",
+            subfolder="audio",
+            orientation="portrait",
+            callback=audio_sub_cb,
+        )
         report(40, f"Voiceover ready for all {len(scene_dicts)} scenes", 2)
 
         # -------------------------------------------------------------
@@ -611,7 +624,14 @@ class YouTubeAgent:
         audios = {}
         for lang_code, lang_obj in [("en", package.english), ("hi", package.hindi), ("gu", package.gujarati)]:
             scenes_dict = [s.model_dump() for s in lang_obj.scenes]
-            audios[lang_code] = self.audio_gen.generate_scene_audios(scenes_dict, run_dir, lang=lang_code)
+            folder = f"audio_{lang_code}" if lang_code != "en" else "audio"
+            audios[lang_code] = self.audio_gen.generate_scene_audios(
+                scenes_dict,
+                run_dir,
+                lang=lang_code,
+                subfolder=folder,
+                orientation="portrait",
+            )
         report(45, "Voiceovers synthesized for all 3 languages", 2)
 
         # STEP 3: Generate 9:16 Visuals (with scene checkpointing)
