@@ -55,12 +55,22 @@ class YouTubeAgent:
         self.story_publisher = StoryPublisher()
 
     def find_latest_resumable_run(self, trilingual: bool = False) -> Optional[Path]:
-        """Finds the most recent incomplete run directory to resume."""
+        """Finds the most recent incomplete run directory to resume within the last 48 hours."""
         pattern = "run_trilingual_*" if trilingual else "run_*"
         runs = sorted(list(config.OUTPUT_DIR.glob(pattern)), reverse=True)
+        now = time.time()
         for r in runs:
             if not r.is_dir():
                 continue
+            # Skip runs older than 48 hours to avoid picking up outdated or corrupted historical runs
+            try:
+                if (now - r.stat().st_mtime) > (48 * 3600):
+                    continue
+            except Exception:
+                continue
+            if (r / ".unresumable").exists() or (r / ".corrupt").exists():
+                continue
+
             if trilingual:
                 pkg_file = r / "package.json"
                 sum_file = r / "summary.json"

@@ -1,5 +1,7 @@
 # 🚀 Autonomous AI YouTube Creator Agent
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/thakoralpesh3/youtube-agent/blob/main/YouTube_Agent_Colab.ipynb)
+
 An end-to-end automated AI agent that daily generates viral **YouTube Shorts** (scripts, voiceovers, vertical 9:16 visuals, animated captions, titles, SEO descriptions, tags, and pinned comments) and automatically uploads them directly to your YouTube channel.
 
 ---

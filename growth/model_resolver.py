@@ -24,6 +24,14 @@ CACHE_FILE = BASE_DIR / "output" / ".model_cache.json"
 ENV_FILE = BASE_DIR / ".env"
 
 # Active robust fallback chains excluding deprecated 404 models
+DEPRECATED_MODELS = {
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.0-pro",
+    "gemini-pro",
+}
 DEFAULT_TIER_FALLBACKS = {
     "argon": [
         "gemini-4-argon",
@@ -218,6 +226,9 @@ class ModelResolver:
                     continue
 
                 clean_name = m_name.replace("models/", "").strip()
+                if clean_name in DEPRECATED_MODELS or any(d in clean_name for d in ["2.5-pro", "2.5-flash", "1.5-pro", "1.5-flash", "1.0-pro"]):
+                    continue
+
                 actions = getattr(m, "supported_actions", []) or []
 
                 if actions and "generateContent" not in actions:
