@@ -1,9 +1,11 @@
+import json
 import logging
 import os
 import socket
 import sys
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 # Force IPv4 preference for Google OAuth endpoints to prevent SSLEOFError/Errno 93
 try:
@@ -16,6 +18,9 @@ try:
 except Exception:
     pass
 
+import requests
+from requests.adapters import HTTPAdapter
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -31,6 +36,26 @@ SCOPES = [
 ]
 
 
+class _TimeoutHTTPAdapter(HTTPAdapter):
+    """Ensures Google OAuth request calls enforce explicit connection and read timeouts."""
+    def __init__(self, timeout: int = 10, *args, **kwargs):
+        self.timeout = timeout
+        super().__init__(*args, **kwargs)
+
+    def send(self, *args, **kwargs):
+        kwargs["timeout"] = kwargs.get("timeout") or self.timeout
+        return super().send(*args, **kwargs)
+
+
+def _get_auth_request(timeout: int = 10) -> Request:
+    """Builds a Google Auth Request object with explicit timeouts to prevent 20s socket stalls."""
+    session = requests.Session()
+    adapter = _TimeoutHTTPAdapter(timeout=timeout)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return Request(session=session)
+
+
 class YouTubeAuth:
     def __init__(
         self,
@@ -39,16 +64,27 @@ class YouTubeAuth:
     ):
         self.client_secret_file = client_secret_file or Path(config.YOUTUBE_CLIENT_SECRET_FILE)
         self.token_file = token_file or Path(config.YOUTUBE_TOKEN_FILE)
+        self._is_revoked: bool = False
 
     def has_credentials(self) -> bool:
         """Returns True if token.json or client_secret.json exists."""
         return self.token_file.exists() or self.client_secret_file.exists()
 
-    def is_token_valid(self) -> bool:
+    def has_refresh_token(self) -> bool:
+        """Returns True if token.json exists and contains a refresh token."""
+        if not self.token_file.exists():
+            return False
+        try:
+            data = json.loads(self.token_file.read_text(encoding="utf-8"))
+            return bool(data.get("refresh_token"))
+        except Exception:
+            return False
+
+    def is_token_valid(self, max_retries: int = 2) -> bool:
         """
         Returns True if valid, usable YouTube credentials currently exist.
-        Safely attempts a silent refresh if expired without initiating interactive web flow.
-        Returns False without raising errors if the refresh token is expired, revoked, or missing.
+        Safely attempts a silent refresh with timeout & retry if expired.
+        Returns False only if the token is truly missing, corrupt, or revoked.
         """
         if not self.token_file.exists():
             return False
@@ -56,17 +92,42 @@ class YouTubeAuth:
             creds = Credentials.from_authorized_user_file(str(self.token_file), SCOPES)
             if creds.valid:
                 return True
-            if creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                    with open(self.token_file, "w") as token_out:
-                        token_out.write(creds.to_json())
-                    return True
-                except Exception:
-                    return False
+            if creds.refresh_token:
+                req = _get_auth_request(timeout=8)
+                for attempt in range(max_retries):
+                    try:
+                        creds.refresh(req)
+                        with open(self.token_file, "w") as token_out:
+                            token_out.write(creds.to_json())
+                        self._is_revoked = False
+                        return True
+                    except RefreshError as ref_err:
+                        err_str = str(ref_err).lower()
+                        if "invalid_grant" in err_str or "revoked" in err_str or "deleted" in err_str:
+                            logger.warning(f"YouTube refresh token is permanently revoked or expired: {ref_err}")
+                            self._is_revoked = True
+                            return False
+                        logger.warning(f"YouTube token refresh error (attempt {attempt + 1}/{max_retries}): {ref_err}")
+                        time.sleep(1)
+                    except (TransportError, requests.RequestException, socket.error) as net_err:
+                        logger.debug(f"Network error during YouTube token refresh (attempt {attempt + 1}/{max_retries}): {net_err}")
+                        time.sleep(1)
+                    except Exception as e:
+                        logger.warning(f"Unexpected error during YouTube token refresh: {e}")
+                        break
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Could not load or parse YouTube token file: {e}")
             return False
+
+    def is_permanently_revoked(self) -> bool:
+        """
+        Returns True if the token is permanently revoked or invalid (invalid_grant),
+        requiring interactive re-login. Returns False if token is valid or temporarily unreachable due to network.
+        """
+        if not self.token_file.exists() or not self.has_refresh_token():
+            return True
+        return self._is_revoked
 
     def get_credentials(self) -> Credentials:
         """
@@ -85,18 +146,44 @@ class YouTubeAuth:
 
         # 2. Refresh or create new token
         if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
+            if creds and creds.refresh_token:
                 logger.info("Refreshing expired YouTube OAuth2 credentials...")
-                try:
-                    creds.refresh(Request())
-                    # Re-save refreshed credentials
-                    with open(self.token_file, "w") as token_out:
-                        token_out.write(creds.to_json())
-                    logger.info("Refreshed and saved updated credentials.")
+                req = _get_auth_request(timeout=10)
+                refresh_succeeded = False
+                permanent_failure = False
+                last_err = None
+
+                for attempt in range(3):
+                    try:
+                        creds.refresh(req)
+                        with open(self.token_file, "w") as token_out:
+                            token_out.write(creds.to_json())
+                        logger.info("Refreshed and saved updated credentials.")
+                        refresh_succeeded = True
+                        break
+                    except RefreshError as ref_err:
+                        last_err = ref_err
+                        err_str = str(ref_err).lower()
+                        if "invalid_grant" in err_str or "revoked" in err_str or "deleted" in err_str:
+                            permanent_failure = True
+                            self._is_revoked = True
+                            logger.warning(f"YouTube refresh token permanently revoked: {ref_err}")
+                            break
+                        time.sleep(1)
+                    except Exception as net_err:
+                        last_err = net_err
+                        logger.debug(f"Network error refreshing token (attempt {attempt + 1}/3): {net_err}")
+                        time.sleep(1)
+
+                if refresh_succeeded:
                     return creds
-                except Exception as e:
-                    logger.warning(f"Failed to refresh token ({e}). Starting new login flow...")
-                    creds = None
+
+                if not permanent_failure:
+                    # Token is NOT revoked; network or Google service was just temporarily unreachable
+                    logger.warning(f"YouTube token refresh failed due to temporary network connectivity issue: {last_err}")
+                    raise ConnectionError(f"Temporary network issue refreshing YouTube token: {last_err}. Will retry when connection resumes.")
+
+                creds = None
 
             if not creds:
                 if not self.client_secret_file.exists():

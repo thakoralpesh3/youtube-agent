@@ -371,6 +371,23 @@ def run_daily_youtube_cleaner(force: bool = False) -> bool:
 
 
 
+_ALERT_COOLDOWN_FILE = config.OUTPUT_DIR / ".youtube_login_alert_cooldown"
+
+
+def _should_notify_login_required(cooldown_hours: int = 12) -> bool:
+    """Enforces cooldown on YouTube login desktop notifications to prevent alert fatigue."""
+    try:
+        if _ALERT_COOLDOWN_FILE.exists():
+            last_ts = float(_ALERT_COOLDOWN_FILE.read_text(encoding="utf-8").strip())
+            if time.time() - last_ts < cooldown_hours * 3600:
+                return False
+        _ALERT_COOLDOWN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _ALERT_COOLDOWN_FILE.write_text(str(time.time()), encoding="utf-8")
+        return True
+    except Exception:
+        return True
+
+
 def hourly_cycle():
     """
     Runs every 1 hour automatically:
@@ -386,46 +403,55 @@ def hourly_cycle():
     # Checks if any generated contents were unable to upload on YouTube, and uploads them!
     if _YOUTUBE_RUN_LOCK.acquire(blocking=False):
         try:
-            from youtube.auth import YouTubeAuth
-            auth = YouTubeAuth()
-            if auth.is_token_valid():
-                # 1a. Upload any pending or leftover video files across output/
-                try:
-                    from upload_to_youtube import get_pending_videos, upload_all_pending
-                    pending_vids = get_pending_videos()
+            # First: check if there are any pending videos or resumable runs that actually need uploading
+            pending_vids = []
+            try:
+                from upload_to_youtube import get_pending_videos
+                pending_vids = get_pending_videos()
+            except Exception as pe:
+                logger.debug(f"Error checking pending videos: {pe}")
+
+            resumable = None
+            agent = None
+            try:
+                from agent import YouTubeAgent
+                agent = YouTubeAgent()
+                resumable = agent.find_latest_resumable_run(trilingual=True)
+            except Exception as re:
+                logger.debug(f"Error checking resumable run: {re}")
+
+            if not pending_vids and not resumable:
+                logger.info("✨ [Hourly YouTube Pulse] All generated videos are uploaded and up to date.")
+            else:
+                # There is actual content waiting to be uploaded!
+                from youtube.auth import YouTubeAuth
+                auth = YouTubeAuth()
+                if auth.is_token_valid():
                     if pending_vids:
                         logger.info(f"📋 [Hourly YouTube Pulse] Found {len(pending_vids)} unuploaded generated video(s). Attempting YouTube upload...")
+                        from upload_to_youtube import upload_all_pending
                         uploaded = upload_all_pending(watch_mode=False)
                         if uploaded:
                             logger.info(f"🎉 [Hourly YouTube Pulse] Successfully uploaded {len(uploaded)} previously unuploaded video(s) to YouTube!")
-                    else:
-                        logger.info("✨ [Hourly YouTube Pulse] All generated videos are uploaded and up to date.")
-                except Exception as up_err:
-                    logger.warning(f"⚠️ [Hourly YouTube Pulse] Leftover video upload notice: {up_err}")
-
-                # 1b. Check if any interrupted generation run exists and resume it to finish and upload
-                try:
-                    from agent import YouTubeAgent
-                    agent = YouTubeAgent()
-                    resumable = agent.find_latest_resumable_run(trilingual=True)
-                    if resumable:
+                    if resumable and agent:
                         logger.info(f"🔄 [Hourly YouTube Pulse] Found incomplete generation run ({resumable.name}). Resuming to compile and upload...")
                         agent.run_trilingual(target_platform="youtube", dry_run=False, resume=True)
-                except Exception as res_err:
-                    logger.warning(f"⚠️ [Hourly YouTube Pulse] Incomplete run resumption notice: {res_err}")
-
-            else:
-                logger.info("ℹ️ [Hourly YouTube Pulse] YouTube OAuth token not valid or expired. Skipping hourly upload attempt.")
-                try:
-                    from growth.notifier import notifier
-                    notifier.send(
-                        "⚠️ YouTube Login Required",
-                        "YouTube token expired. Please open a terminal and run: python3 upload_to_youtube.py",
-                        urgency="normal",
-                        timeout_ms=8000,
-                    )
-                except Exception:
-                    pass
+                else:
+                    if auth.is_permanently_revoked():
+                        logger.warning("⚠️ [Hourly YouTube Pulse] YouTube OAuth token permanently revoked or invalid.")
+                        if _should_notify_login_required(cooldown_hours=12):
+                            try:
+                                from growth.notifier import notifier
+                                notifier.send(
+                                    "⚠️ YouTube Login Required",
+                                    "YouTube OAuth token expired. Please open a terminal and run: python3 upload_to_youtube.py",
+                                    urgency="normal",
+                                    timeout_ms=10000,
+                                )
+                            except Exception:
+                                pass
+                    else:
+                        logger.info("ℹ️ [Hourly YouTube Pulse] YouTube upload deferred: token refresh temporarily unavailable (network offline). Will retry on next hourly cycle.")
         except Exception as yt_err:
             logger.warning(f"⚠️ [Hourly YouTube Pulse] Notice during hourly YouTube check: {yt_err}")
         finally:

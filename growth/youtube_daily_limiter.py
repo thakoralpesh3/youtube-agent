@@ -105,10 +105,11 @@ class YouTubeDailyLimiter:
 
     def record_run(
         self,
-        run_dir: Path,
-        topic: str,
-        videos: Dict[str, str],
-        details: Optional[Dict[str, Any]] = None
+        run_dir: Optional[Path] = None,
+        topic: str = "",
+        videos: Optional[Dict[str, str]] = None,
+        details: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> None:
         """
         Records a completed YouTube pipeline run and updates the daily quota.
@@ -128,10 +129,10 @@ class YouTubeDailyLimiter:
             entry = {
                 "timestamp": now_iso,
                 "date": today,
-                "run_dir": str(run_dir),
+                "run_dir": str(run_dir) if run_dir else "",
                 "topic": topic,
-                "videos": videos,
-                "details": details or {}
+                "videos": videos or {},
+                "details": details or kwargs
             }
             history = self.state.setdefault("history", [])
             history.append(entry)
