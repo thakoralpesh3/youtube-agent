@@ -8,8 +8,15 @@ BASE_DIR = Path(__file__).resolve().parent
 # Load .env file
 load_dotenv(BASE_DIR / ".env")
 
-# API Keys & Secrets
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# API Keys & Secrets (Supports multiple fallback keys for high-availability quota failover)
+raw_gemini_keys = os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", ""))
+GEMINI_API_KEYS = [k.strip() for k in raw_gemini_keys.split(",") if k.strip()]
+for idx in range(1, 10):
+    extra_k = os.getenv(f"GEMINI_API_KEY_{idx}", "").strip()
+    if extra_k and extra_k not in GEMINI_API_KEYS:
+        GEMINI_API_KEYS.append(extra_k)
+
+GEMINI_API_KEY = GEMINI_API_KEYS[0] if GEMINI_API_KEYS else ""
 
 # Autonomous Dynamic Model Resolver (Auto-upgrades to latest Gemini model, e.g. Gemini 4 Argon, and respects user overrides)
 try:

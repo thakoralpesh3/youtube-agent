@@ -353,7 +353,10 @@ from growth.network_guard import NetworkGuard
 
 class ScriptGenerator:
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or config.GEMINI_API_KEY
+        self.api_keys = [api_key] if api_key else (getattr(config, "GEMINI_API_KEYS", None) or [config.GEMINI_API_KEY])
+        self.api_keys = [k for k in self.api_keys if k]
+        self.current_key_idx = 0
+        self.api_key = self.api_keys[0] if self.api_keys else ""
         self.model_name = model_name or config.GEMINI_MODEL
 
         if not self.api_key:
@@ -363,6 +366,16 @@ class ScriptGenerator:
 
         self.client = genai.Client(api_key=self.api_key)
         self.growth_engine = GrowthEngine(api_key=self.api_key)
+
+    def rotate_api_key(self) -> bool:
+        """Rotates to next available GEMINI_API_KEY if multiple are provided."""
+        if len(self.api_keys) > 1:
+            self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
+            self.api_key = self.api_keys[self.current_key_idx]
+            self.client = genai.Client(api_key=self.api_key)
+            logger.info(f"🔄 Rotated Gemini API key to key #{self.current_key_idx + 1} of {len(self.api_keys)}")
+            return True
+        return False
 
     def _ensure_native_title(self, title: str, lang: str, english_title: str) -> str:
         """
@@ -496,35 +509,43 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
         candidate_models = get_candidate_models(preferred=self.model_name, tier="argon")
 
         for model in candidate_models:
-            try:
-                logger.info(f"Generating Trilingual Shorts package using Gemini model: {model}")
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        response_schema=TrilingualShortsPackage,
-                        temperature=0.75,
-                    ),
-                )
-                package_data = json.loads(response.text)
-                package = TrilingualShortsPackage(**package_data)
+            for key_attempt in range(len(self.api_keys)):
+                try:
+                    logger.info(f"Generating Trilingual Shorts package using Gemini model: {model} (key #{self.current_key_idx + 1})")
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_mime_type="application/json",
+                            response_schema=TrilingualShortsPackage,
+                            temperature=0.75,
+                        ),
+                    )
+                    package_data = json.loads(response.text)
+                    package = TrilingualShortsPackage(**package_data)
 
-                # Ensure Hindi and Gujarati titles are in native scripts (Devanagari and Gujarati)
-                package.hindi.title = self._ensure_native_title(package.hindi.title, "hi", package.english.title)
-                package.gujarati.title = self._ensure_native_title(package.gujarati.title, "gu", package.english.title)
+                    # Ensure Hindi and Gujarati titles are in native scripts (Devanagari and Gujarati)
+                    package.hindi.title = self._ensure_native_title(package.hindi.title, "hi", package.english.title)
+                    package.gujarati.title = self._ensure_native_title(package.gujarati.title, "gu", package.english.title)
 
-                # Validate strict all-ages compliance
-                validate_family_safe(f"{package.topic} {package.english.title} {package.english.voiceover_script} {package.visual_prompt}")
+                    # Validate strict all-ages compliance
+                    validate_family_safe(f"{package.topic} {package.english.title} {package.english.voiceover_script} {package.visual_prompt}")
 
-                # Record topic history
-                record_topic_history(package.topic, package.english.title)
-                return package
-            except Exception as e:
-                logger.warning(f"Model {model} failed for trilingual package: {e}. Trying next model...")
+                    # Record topic history
+                    record_topic_history(package.topic, package.english.title)
+                    return package
+                except Exception as e:
+                    logger.warning(f"Model {model} failed for trilingual package: {e}.")
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        if self.rotate_api_key():
+                            continue
+                    break
 
-        raise RuntimeError("Failed to generate Trilingual Shorts package across all candidate models.")
+        logger.warning("⚠️ All Gemini candidate models and API keys encountered rate limits (429/503). Activating autonomous high-retention Trilingual Shorts generator...")
+        package = self._create_fallback_trilingual_package(chosen_pillar or specific_topic or "stoic mental resilience")
+        record_topic_history(package.topic, package.english.title)
+        return package
 
     def generate_script(self, niche: Optional[str] = None, specific_topic: Optional[str] = None, callback: Optional[Callable] = None) -> ShortsScript:
         # Pre-check network connectivity
@@ -603,34 +624,42 @@ Requirements:
 
         last_error = None
         for model in candidate_models:
-            try:
-                logger.info(f"Generating YouTube Shorts script using Gemini model: {model}")
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        response_schema=ShortsScript,
-                        temperature=0.8,
-                    ),
-                )
-                raw_text = response.text
-                script_data = json.loads(raw_text)
-                script = ShortsScript(**script_data)
+            for key_attempt in range(len(self.api_keys)):
+                try:
+                    logger.info(f"Generating YouTube Shorts script using Gemini model: {model} (key #{self.current_key_idx + 1})")
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_mime_type="application/json",
+                            response_schema=ShortsScript,
+                            temperature=0.8,
+                        ),
+                    )
+                    raw_text = response.text
+                    script_data = json.loads(raw_text)
+                    script = ShortsScript(**script_data)
 
-                # Validate strict all-ages compliance
-                full_text = f"{script.topic} {script.title} {script.description} " + " ".join(s.narration + " " + s.visual_prompt for s in script.scenes)
-                validate_family_safe(full_text)
-                
-                # Record to history for future uniqueness
-                record_topic_history(script.topic, script.title)
-                return script
-            except Exception as e:
-                logger.warning(f"Model {model} failed with: {e}. Trying next candidate model...")
-                last_error = e
+                    # Validate strict all-ages compliance
+                    full_text = f"{script.topic} {script.title} {script.description} " + " ".join(s.narration + " " + s.visual_prompt for s in script.scenes)
+                    validate_family_safe(full_text)
+                    
+                    # Record to history for future uniqueness
+                    record_topic_history(script.topic, script.title)
+                    return script
+                except Exception as e:
+                    logger.warning(f"Model {model} failed with: {e}.")
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        if self.rotate_api_key():
+                            continue
+                    last_error = e
+                    break
 
-        raise RuntimeError(f"All Gemini models failed to generate script. Last error: {last_error}")
+        logger.warning(f"⚠️ All Gemini models and API keys encountered rate limits (429/503): {last_error}. Activating autonomous high-retention Shorts script generator...")
+        script = self._create_fallback_shorts_script(chosen_topic)
+        record_topic_history(script.topic, script.title)
+        return script
 
     def generate_long_video_script(
         self,
@@ -703,33 +732,38 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
 
         last_error = None
         for model in candidate_models:
-            try:
-                logger.info(f"Generating Standard YouTube Video script using Gemini model: {model}")
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        response_schema=LongVideoScript,
-                        temperature=0.75,
-                    ),
-                )
-                raw_text = response.text
-                script_data = json.loads(raw_text)
-                script = LongVideoScript(**script_data)
+            for key_attempt in range(len(self.api_keys)):
+                try:
+                    logger.info(f"Generating Standard YouTube Video script using Gemini model: {model} (key #{self.current_key_idx + 1})")
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_mime_type="application/json",
+                            response_schema=LongVideoScript,
+                            temperature=0.75,
+                        ),
+                    )
+                    raw_text = response.text
+                    script_data = json.loads(raw_text)
+                    script = LongVideoScript(**script_data)
 
-                # Validate strict all-ages compliance
-                full_text = f"{script.topic} {script.title} {script.description} {script.thumbnail_headline} " + " ".join(s.narration + " " + s.visual_prompt for s in script.scenes)
-                validate_family_safe(full_text)
+                    # Validate strict all-ages compliance
+                    full_text = f"{script.topic} {script.title} {script.description} {script.thumbnail_headline} " + " ".join(s.narration + " " + s.visual_prompt for s in script.scenes)
+                    validate_family_safe(full_text)
 
-                record_topic_history(script.topic, script.title)
-                return script
-            except Exception as e:
-                logger.warning(f"Model {model} failed for long video script: {e}. Trying next candidate model...")
-                last_error = e
+                    record_topic_history(script.topic, script.title)
+                    return script
+                except Exception as e:
+                    logger.warning(f"Model {model} failed for long video script: {e}.")
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        if self.rotate_api_key():
+                            continue
+                    last_error = e
+                    break
 
-        logger.warning(f"⚠️ All Gemini models encountered API rate limits or errors: {last_error}. Activating autonomous high-quality standard video script generator...")
+        logger.warning(f"⚠️ All Gemini models and API keys encountered rate limits or errors: {last_error}. Activating autonomous high-quality standard video script generator...")
         script = self._create_fallback_long_video_script(chosen_topic)
         record_topic_history(script.topic, script.title)
         return script
@@ -868,6 +902,173 @@ Subscribe to Daily Growth for daily masterclasses in self-improvement and high p
             ),
             scenes=scenes,
             pinned_comment=f"What is the single biggest habit you are working to master this week? Share your thoughts below!",
+        )
+
+    def _create_fallback_trilingual_package(self, topic: str) -> TrilingualShortsPackage:
+        """
+        Constructs an authentic, high-converting TrilingualShortsPackage across English,
+        Hindi (genuine Devanagari script), and Gujarati (genuine Gujarati script)
+        when Gemini API daily free-tier quota (429 RESOURCE_EXHAUSTED) is reached.
+        Guarantees that daily uploads NEVER fail even under API downtime.
+        """
+        topic_lower = (topic or "").lower()
+        if "health" in topic_lower or "sleep" in topic_lower or "vitality" in topic_lower:
+            theme_cat = "health_habits"
+            pillar_name = "Practical Daily Health Habits"
+            en_title = "The Morning Habit Draining Your Brain #Shorts"
+            hi_title = "सुबह की यह गलत आदत तुरंत बदलो #Shorts"
+            gu_title = "સવારની આ ખરાબ આદત તરત જ બદલો #Shorts"
+
+            en_vo = "Checking your phone the instant you wake up is sabotaging your mental energy. You flood your half-asleep brain with cortisol and dopamine spikes, guaranteeing brain fog for the rest of the day. Rule number one: keep screens away for the first thirty minutes. Get direct sunlight in your eyes and drink a large glass of water. Subscribe to Daily Growth and master your daily vitality."
+            hi_vo = "सुबह आँख खुलते ही फोन देखना आपकी ऊर्जा को बर्बाद कर रहा है। ऐसा करने से दिमाग में तनाव और बेचैनी बढ़ती है, जिससे पूरा दिन थकान महसूस होती है। नियम नंबर एक याद रखिए: उठने के बाद पहले तीस मिनट तक स्क्रीन से दूर रहिए। ताजी हवा और धूप लीजिए और पानी पीजिए। अपनी सेहत सुधारने के लिए डेली ग्रोथ को सब्सक्राइब करें।"
+            gu_vo = "સવારે આંખ ખુલતાની સાથે જ મોબાઈલ જોવો એ તમારા દિવસની સૌથી મોટી ભૂલ છે. આમ કરવાથી મગજ પર સીધો તણાવ વધે છે અને આખો દિવસ આળસ રહે છે. નિયમ નંબર એક: સવારે ઉઠ્યા પછી પેહલી ત્રીસ મિનિટ સ્ક્રીનથી દૂર રહો. સૂર્યપ્રકાશ લો અને પાણી પીઓ. ઉત્તમ સ્વાસ્થ્ય માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
+
+            en_s1, hi_s1, gu_s1 = "Checking your phone the instant you wake up is sabotaging your mental energy.", "सुबह आँख खुलते ही फोन देखना आपकी ऊर्जा को बर्बाद कर रहा है।", "સવારે આંખ ખુલતાની સાથે જ મોબાઈલ જોવો એ તમારા દિવસની સૌથી મોટી ભૂલ છે."
+            en_s2, hi_s2, gu_s2 = "You flood your half-asleep brain with stress hormones, guaranteeing brain fog all day.", "ऐसा करने से दिमाग में तनाव और बेचैनी बढ़ती है, जिससे पूरा दिन थकान महसूस होती है।", "આમ કરવાથી મગજ પર સીધો તણાવ વધે છે અને આખો દિવસ આળસ અને થાક રહે છે."
+            en_s3, hi_s3, gu_s3 = "Rule number one: zero screens for thirty minutes. Get sunlight and drink water.", "नियम नंबर एक: उठने के बाद पहले तीस मिनट स्क्रीन से दूर रहिए और धूप लीजिए।", "નિયમ નંબર એક: સવારે ઉઠ્યા પછી પેહલી ત્રીસ મિનિટ સ્ક્રીનથી દૂર રહો અને તાજી હવા લો."
+            en_s4, hi_s4, gu_s4 = "Protect your morning. Subscribe to Daily Growth and master your daily vitality.", "अपनी सुबह की रक्षा करें। ऊर्जावान जीवन के लिए डेली ग्रोथ को सब्सक्राइब करें।", "તમારી સવારને સુધારો. ઉત્તમ સ્વાસ્થ્ય માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
+        elif "financ" in topic_lower or "money" in topic_lower or "wealth" in topic_lower:
+            theme_cat = "financial_discipline"
+            pillar_name = "Realistic Financial Discipline"
+            en_title = "Stop Buying Fake Wealth #Shorts"
+            hi_title = "दिखावे का खर्च तुरंत बंद करो #Shorts"
+            gu_title = "દેખાડો કરવાનું તરત જ બંધ કરો #Shorts"
+
+            en_vo = "Spending money to impress people who do not care about you is keeping you broke. Real wealth is what you do not see: the investments growing silently and the freedom to walk away. Rule number one: delay every non-essential purchase by twenty-four hours. If you still want it tomorrow, evaluate your priorities. Subscribe to Daily Growth and build unbreakable financial discipline."
+            hi_vo = "दूसरों को प्रभावित करने के लिए फिजूलखर्च करना आपको हमेशा गरीब बनाए रखेगा। सच्ची दौलત वह है जो दिखाई नहीं देती: आपकी बचत और आपकी आजादी। नियम नंबर एक: किसी भी गैर-जरूरी खरीदारी को चौबीસ घंटे के लिए टाल दीजिए। अगर कल भी उसकी जरूरत लगे, तभी विचार करें। आर्थिक रूप से मजबूत बनने के लिए डेली ग्रोथ को सब्सक्राइब करें।"
+            gu_vo = "બીજાને પ્રભાવિત કરવા માટે પૈસા બગાડવા એ ગરીબીની સૌથી મોટી નિશાની છે. ખરી સંપત્તિ એ છે જે દેખાતી નથી: તમારી બચત અને તમારી સ્વતંત્રતા. નિયમ નંબર એક: કોઈપણ બિનજરૂરી ખરીદીને ચોવીસ કલાક માટે ટાળો. જો કાલે પણ જરૂર લાગે તો જ વિચારો. આર્થિક મજબૂતી માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
+
+            en_s1, hi_s1, gu_s1 = "Spending money to impress people who do not care about you is keeping you broke.", "दूसरों को प्रभावित करने के लिए फिजूलखर्च करना आपको हमेशा गरीब बनाए रखेगा।", "બીજાને પ્રભાવિત કરવા માટે પૈસા બગાડવા એ ગરીબીની સૌથી મોટી નિશાની છે."
+            en_s2, hi_s2, gu_s2 = "Real wealth is what you do not see: quiet investments and genuine freedom.", "सच्ची दौलत वह है जो दिखाई नहीं देती: आपकी बचत और आपकी मानसिक आजादी।", "ખરી સંપત્તિ એ છે જે દેખાતી નથી: તમારી બચત અને તમારી સાચી સ્વતંત્રતા."
+            en_s3, hi_s3, gu_s3 = "Rule number one: delay every impulse purchase by twenty-four hours.", "नियम नंबर एक: किसी भी गैर-जरूरी खरीदारी को चौबीस घंटे के लिए टाल दीजिए।", "નિયમ નંબર એક: કોઈપણ બિનજરૂરી ખરીદીને ચોવીસ કલાક માટે ટાળી દો."
+            en_s4, hi_s4, gu_s4 = "Invest in freedom, not temporary status. Subscribe to Daily Growth today.", "दिखावे में नहीं, स्वतंत्रता में निवेश करें। डेली ग्रोथ को सब्सक्राइब करें।", "દેખાડામાં નહિ, સાચી આઝાદીમાં રોકાણ કરો. ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
+        else:
+            theme_cat = "stoic_resilience"
+            pillar_name = "Stoic Mental Resilience"
+            en_title = "Stop Letting Small Things Break You #Shorts"
+            hi_title = "हर छोटी बात पर परेशान होना बंद करो #Shorts"
+            gu_title = "દરેક નાની વાત પર ગુસ્સે થવાનું બંધ કરો #Shorts"
+
+            en_vo = "Stop reacting to every tiny irritation in your day. When you let an insult or delay ruin your mood, you hand your power to strangers. The Stoics lived by one rule: you cannot control what happens, but you have 100% control over how you react. Breathe. Pause for three seconds. Choose calm over chaos. Subscribe to Daily Growth and master your mind."
+            hi_vo = "हर छोटी बात पर अपनी शांति खोना बंद कीजिए। जब आप किसी की बात या देरी से परेशान होते हैं, तो आप अपनी ताकत दूसरों को दे देते हैं। जीवन का सबसे बड़ा नियम यही है: हालात आपके वश में नहीं हैं, लेकिन आपकी प्रतिक्रिया पूरी तरह आपके नियंत्रण में है। तीन सेकंड रुकिए। गुस्से के बदले शांति चुनिए। डेली ग्रोथ को सब्सक्राइब करें और खुद पर विजय पाएं।"
+            gu_vo = "દરેક નાની વાત પર મન અશાંત કરવાનું બંધ કરો. જ્યારે તમે બીજાના શબ્દોથી ગુસ્સે થાઓ છો, ત્યારે તમે તમારી શક્તિ બીજાના હાથમાં સોંપી દો છો. જીવનનો સૌથી મોટો નિયમ છે: પરિસ્થિતિ તમારા હાથમાં નથી, પણ તમારી પ્રતિક્રિયા સો ટકા તમારા હાથમાં છે. ત્રણ સેકન્ડ ઊંડો શ્વાસ લો. ક્રોધની જગ્યાએ સંયમ પસંદ કરો. ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો અને સફળ બનો."
+
+            en_s1, hi_s1, gu_s1 = "Stop reacting to every tiny irritation in your day. Never hand your power to strangers.", "हर छोटी बात पर अपनी शांति खोना बंद कीजिए। कभी अपनी ताकत दूसरों को मत सौंपिए।", "દરેક નાની વાત પર મન અશાંત કરવાનું બંધ કરો. ક્યારેય તમારી શક્તિ બીજાને ન સોંપો."
+            en_s2, hi_s2, gu_s2 = "The world wants you anxious and distracted, reacting blindly to every external impulse.", "यह दुनिया आपको हमेशा परेशान देखना चाहती है, ताकि आप अपने लक्ष्य से भटक जाएं।", "આ દુનિયા તમને હંમેશા ચિંતિત રાખવા માંગે છે, જેથી તમે તમારા ધ્યેયથી ભટકી જાઓ."
+            en_s3, hi_s3, gu_s3 = "Rule number one: you cannot control events, but you control your response.", "नियम नंबर एक: हालात आपके वश में नहीं हैं, लेकिन आपकी प्रतिक्रिया आपके हाथ में है।", "નિયમ નંબર એક: પરિસ્થિતિ તમારા હાથમાં નથી, પણ પ્રતિક્રિયા તમારા હાથમાં છે."
+            en_s4, hi_s4, gu_s4 = "Breathe. Choose calm over chaos. Subscribe to Daily Growth and master your mind.", "तीन सेकंड रुकिए। शांति चुनिए। खुद पर विजय पाने के लिए डेली ग्रोथ को सब्सक्राइब करें।", "ઊંડો શ્વાસ લો. સંયમ પસંદ કરો. પોતાના પર વિજય મેળવવા ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
+
+        base_prompt = "Cinematic 9:16 vertical cinema shot of a disciplined mentor in a dark tailored coat, ARRI Alexa LF, 35mm anamorphic lens, authentic natural lighting, 8k resolution, documentary realism, strictly fully clothed, no text overlay"
+
+        def _make_lang_scenes(s1, s2, s3, s4, b1, b2, b3, b4):
+            return [
+                Scene(
+                    scene_number=1,
+                    narration=s1,
+                    speaker_entity="Disciplined Stoic Mentor in dark coat",
+                    speaking_action="Speaking directly into the camera with mouth open in mid-speech delivery",
+                    proper_sign="Raising hand in an authoritative STOP sign gesture 🛑",
+                    sign_badge=b1,
+                    visual_prompt=f"{base_prompt}, looking firmly into camera with mouth open speaking, holding palm up in firm STOP gesture",
+                    estimated_duration_sec=11.5,
+                ),
+                Scene(
+                    scene_number=2,
+                    narration=s2,
+                    speaker_entity="Disciplined Stoic Mentor in dark coat",
+                    speaking_action="Speaking with intense clarity gesturing to caution against traps",
+                    proper_sign="Holding up an antique pocket watch pointing to passing seconds ⏳",
+                    sign_badge=b2,
+                    visual_prompt=f"{base_prompt}, holding up an antique pocket watch pointing to time passing, intense focused eye contact",
+                    estimated_duration_sec=11.0,
+                ),
+                Scene(
+                    scene_number=3,
+                    narration=s3,
+                    speaker_entity="Disciplined Stoic Mentor in dark coat",
+                    speaking_action="Speaking with calm authority with index finger raised firmly",
+                    proper_sign="Raising index finger upright delivering Rule #1 point ☝️",
+                    sign_badge=b3,
+                    visual_prompt=f"{base_prompt}, index finger raised upright delivering Rule #1 lesson, warm golden rim lighting",
+                    estimated_duration_sec=12.0,
+                ),
+                Scene(
+                    scene_number=4,
+                    narration=s4,
+                    speaker_entity="Disciplined Stoic Mentor in dark coat",
+                    speaking_action="Speaking with warm resolute conviction gesturing down to subscribe",
+                    proper_sign="Pointing down towards comments and subscribe button 👇",
+                    sign_badge=b4,
+                    visual_prompt=f"{base_prompt}, pointing down towards bottom frame with confident nod, inspiring sunrise background",
+                    estimated_duration_sec=11.0,
+                ),
+            ]
+
+        en_scenes = _make_lang_scenes(en_s1, en_s2, en_s3, en_s4, "🛑 STOP THIS", "⚡ THE TRAP", "🧠 RULE #1", "👇 SUBSCRIBE")
+        hi_scenes = _make_lang_scenes(hi_s1, hi_s2, hi_s3, hi_s4, "🛑 रुकिए", "⚡ असली सच", "🧠 नियम #1", "👇 सब्सक्राइब करें")
+        gu_scenes = _make_lang_scenes(gu_s1, gu_s2, gu_s3, gu_s4, "🛑 ઊભા રહો", "⚡ સાચો રસ્તો", "🧠 નિયમ #1", "👇 સબ્સ્ક્રાઇબ કરો")
+
+        poll = CommunityPoll(
+            question=f"What is your biggest daily focus challenge in {pillar_name}?",
+            options=["Consistent Execution", "Digital Distractions", "Emotional Reactions", "Lack of Energy"],
+            post_text=f"How do you stay disciplined under pressure? Cast your vote below! #DailyGrowth #Mindset",
+        )
+
+        english_pkg = LanguageScript(
+            language="en",
+            title=en_title,
+            description="Master your habits, emotions, and discipline with timeless daily wisdom. Subscribe to Daily Growth for daily masterclasses.",
+            hashtags="#mindset #discipline #DailyGrowth #motivation #Shorts",
+            tags=["Daily Growth", "Motivation", "Self Improvement", "Discipline", "Shorts"],
+            voiceover_script=en_vo,
+            scenes=en_scenes,
+        )
+
+        hindi_pkg = LanguageScript(
+            language="hi",
+            title=hi_title,
+            description="अपनी भावनाओं, आदतों और विचारों पर नियंत्रण पाएं। मानसिक मजबूती के लिए डेली ग्रोथ को सब्सक्राइब करें।",
+            hashtags="#motivation #mindset #DailyGrowth #hindi #Shorts",
+            tags=["डेली ग्रोथ", "आत्म विकास", "मानसिक मजबूती", "प्रेरणा", "शॉर्ट्स"],
+            voiceover_script=hi_vo,
+            scenes=hi_scenes,
+        )
+
+        gujarati_pkg = LanguageScript(
+            language="gu",
+            title=gu_title,
+            description="તમારા મન, આદતો અને વિચારો પર કાબૂ મેળવો. જીવનમાં આગળ વધવા માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો.",
+            hashtags="#gujarati #motivation #DailyGrowth #mindset #Shorts",
+            tags=["ડેઇલી ગ્રોથ", "પ્રેરણા", "માનસિક શાંતિ", "આત્મવિશ્વાસ", "શોર્ટસ"],
+            voiceover_script=gu_vo,
+            scenes=gu_scenes,
+        )
+
+        return TrilingualShortsPackage(
+            topic=pillar_name,
+            theme_category=theme_cat,
+            visual_prompt=base_prompt,
+            english=english_pkg,
+            hindi=hindi_pkg,
+            gujarati=gujarati_pkg,
+            community_poll=poll,
+        )
+
+    def _create_fallback_shorts_script(self, topic: str) -> ShortsScript:
+        """
+        Constructs an elite single ShortsScript when Gemini API quota is reached.
+        """
+        trilingual_fallback = self._create_fallback_trilingual_package(topic)
+        en = trilingual_fallback.english
+        return ShortsScript(
+            topic=trilingual_fallback.topic,
+            title=en.title,
+            description=en.description,
+            tags=en.tags,
+            category_id=config.DEFAULT_CATEGORY_ID,
+            pinned_comment=f"What is the single biggest habit you are working on today? Share your thoughts below!",
+            scenes=en.scenes,
+            community_poll=trilingual_fallback.community_poll,
         )
 
 
