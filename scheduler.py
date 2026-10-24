@@ -509,6 +509,15 @@ def hourly_cycle():
     except Exception as e:
         logger.debug(f"Daily cleaner check notice: {e}")
 
+    # 9. Autonomous GitHub Auto-Sync Sweep (Ensures any Antigravity updates reach origin/main)
+    try:
+        from core.github_sync import sync_to_github
+        res = sync_to_github(push=True)
+        if res.get("status") == "PUSHED":
+            logger.info(f"🎉 [Hourly Auto-Run] Pushed Antigravity modifications to GitHub: '{res.get('message')}'")
+    except Exception as e:
+        logger.debug(f"Hourly GitHub auto-sync sweep notice: {e}")
+
 
 def run_daily_scheduler():
     upload_time = config.DAILY_UPLOAD_TIME
@@ -545,6 +554,14 @@ def run_daily_scheduler():
         start_telegram_bot_if_configured()
     except Exception as e:
         logger.debug(f"Telegram bot start notice: {e}")
+
+    # Start Real-Time GitHub Auto-Sync Watcher in background daemon thread
+    try:
+        from core.github_watcher import start_watcher_background
+        start_watcher_background()
+        logger.info("🚀 [GitHub Auto-Sync Watcher] Active in background (Monitors & syncs Antigravity changes to GitHub)")
+    except Exception as e:
+        logger.warning(f"Could not start GitHub auto-sync watcher thread: {e}")
 
     # Schedule daily sharp 09:00 AM YouTube execution (Zero-delay GitHub Cloud Dispatch)
     schedule.every().day.at(upload_time).do(job)

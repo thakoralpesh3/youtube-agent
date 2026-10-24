@@ -121,24 +121,24 @@ jobs:
         env:
           NON_INTERACTIVE: "1"
         run: |
-          CMD_ARGS="--trilingual --force --platform social"
+          CMD_ARGS=(--trilingual --force --platform social)
 
           # Determine dry-run mode
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            CMD_ARGS="$CMD_ARGS --dry-run"
+            CMD_ARGS+=(--dry-run)
           fi
 
           # Determine custom topic
           TOPIC="${{ github.event.inputs.topic }}"
           if [ -n "$TOPIC" ]; then
-            CMD_ARGS="$CMD_ARGS --topic \"$TOPIC\""
+            CMD_ARGS+=(--topic "$TOPIC")
           fi
 
           SOURCE="${{ github.event.inputs.content_source || 'generate' }}"
 
           if [ "$SOURCE" = "generate" ] || [ "$SOURCE" = "both" ]; then
-            echo "🚀 Executing Social Media AI Generation: python3 agent.py $CMD_ARGS"
-            python3 agent.py $CMD_ARGS
+            echo "🚀 Executing Social Media AI Generation: python3 agent.py ${CMD_ARGS[*]}"
+            python3 agent.py "${CMD_ARGS[@]}"
           fi
 
           if [ "$SOURCE" = "post_folder" ] || [ "$SOURCE" = "both" ]; then
@@ -151,6 +151,7 @@ jobs:
         if: always()
         with:
           name: daily-social-output-${{ github.run_id }}
+          if-no-files-found: ignore
           path: |
             output/stories/**
             output/run_*

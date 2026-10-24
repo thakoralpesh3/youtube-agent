@@ -243,6 +243,13 @@ def sync_to_github(
 
         logger.info(f"🚀 Pushing commits to GitHub ({remote}/{branch})...")
         code, push_out, push_err = _run_git_cmd(["push", "-u", remote, branch], check=False)
+        if code != 0:
+            logger.info("🔄 Push notice received. Attempting automatic rebase with remote...")
+            pull_code, _, pull_err = _run_git_cmd(["pull", "--rebase", remote, branch], check=False)
+            if pull_code == 0:
+                logger.info("✅ Rebased cleanly. Retrying push...")
+                code, push_out, push_err = _run_git_cmd(["push", "-u", remote, branch], check=False)
+
         if code == 0:
             logger.info("🎉 SUCCESS! All changes pushed to GitHub.")
             return {
@@ -313,12 +320,31 @@ def main():
     parser.add_argument("-m", "--message", type=str, default=None, help="Commit message")
     parser.add_argument("--set-remote", type=str, default=None, help="Set GitHub remote repository URL")
     parser.add_argument("--status", action="store_true", help="Display git status and remote configuration")
+    parser.add_argument("--watch", action="store_true", help="Start real-time background auto-sync watcher")
     parser.add_argument("--sync-secrets", action="store_true", help="Sync local credentials to GitHub repository secrets")
     parser.add_argument("--no-push", action="store_true", help="Commit locally without pushing to GitHub")
     parser.add_argument("--branch", type=str, default="main", help="Git branch (default: main)")
     parser.add_argument("--remote", type=str, default="origin", help="Git remote name (default: origin)")
 
     args = parser.parse_args()
+
+    if args.watch:
+        from core.github_watcher import GitHubAutoSyncWatcher
+        import time
+        print("\n" + "=" * 60)
+        print("🤖 ANTIGRAVITY REAL-TIME GITHUB AUTO-SYNC WATCHER")
+        print("=" * 60)
+        print("Monitoring repository for Antigravity changes...")
+        print("Press Ctrl+C to exit.\n")
+        w = GitHubAutoSyncWatcher(debounce_seconds=15, poll_interval=5)
+        t = w.start(daemon=False)
+        try:
+            while t.is_alive():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nStopping auto-sync watcher...")
+            w.stop()
+        return
 
     if args.set_remote:
         if not is_git_initialized():

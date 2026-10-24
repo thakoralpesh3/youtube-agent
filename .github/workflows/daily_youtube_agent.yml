@@ -129,25 +129,25 @@ jobs:
         env:
           NON_INTERACTIVE: "1"
         run: |
-          CMD_ARGS="--trilingual --force --platform youtube"
+          CMD_ARGS=(--trilingual --force --platform youtube)
 
           # Determine content type
           CONTENT_TYPE="${{ github.event.inputs.content_type || 'both' }}"
-          CMD_ARGS="$CMD_ARGS --content-type $CONTENT_TYPE"
+          CMD_ARGS+=(--content-type "$CONTENT_TYPE")
 
           # Determine dry-run mode
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            CMD_ARGS="$CMD_ARGS --dry-run"
+            CMD_ARGS+=(--dry-run)
           fi
 
           # Determine custom topic
           TOPIC="${{ github.event.inputs.topic }}"
           if [ -n "$TOPIC" ]; then
-            CMD_ARGS="$CMD_ARGS --topic \"$TOPIC\""
+            CMD_ARGS+=(--topic "$TOPIC")
           fi
 
-          echo "🚀 Executing YouTube Agent: python3 agent.py $CMD_ARGS"
-          python3 agent.py $CMD_ARGS
+          echo "🚀 Executing YouTube Agent: python3 agent.py ${CMD_ARGS[*]}"
+          python3 agent.py "${CMD_ARGS[@]}"
 
       - name: Sweep & Auto-Upload Any Leftover Videos
         if: steps.deduplicate.outputs.skip != 'true' && (success() || failure())
@@ -162,6 +162,7 @@ jobs:
         if: always()
         with:
           name: daily-youtube-output-${{ github.run_id }}
+          if-no-files-found: ignore
           path: |
             output/run_*
             output/summary.json
