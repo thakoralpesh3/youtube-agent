@@ -364,7 +364,7 @@ class ScriptGenerator:
                 "GEMINI_API_KEY is not set. Please set it in .env or pass it to ScriptGenerator."
             )
 
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(api_key=self.api_key, http_options=types.HttpOptions(timeout=60000.0))
         self.growth_engine = GrowthEngine(api_key=self.api_key)
 
     def rotate_api_key(self) -> bool:
@@ -372,7 +372,7 @@ class ScriptGenerator:
         if len(self.api_keys) > 1:
             self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
             self.api_key = self.api_keys[self.current_key_idx]
-            self.client = genai.Client(api_key=self.api_key)
+            self.client = genai.Client(api_key=self.api_key, http_options=types.HttpOptions(timeout=60000.0))
             logger.info(f"🔄 Rotated Gemini API key to key #{self.current_key_idx + 1} of {len(self.api_keys)}")
             return True
         return False
