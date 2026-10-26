@@ -65,14 +65,12 @@ jobs:
 
       - name: Install System Dependencies & Fonts
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ffmpeg \
             fonts-noto-core \
-            fonts-noto-extra \
             fonts-noto-cjk \
-            fonts-dejavu-core \
-            fonts-freefont-ttf
+            fonts-dejavu-core
 
       - name: Install Python Dependencies
         run: |
