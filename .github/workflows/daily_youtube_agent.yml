@@ -6,6 +6,7 @@ on:
     - cron: '30 3 * * *'
   repository_dispatch:
     types: [daily_run, trigger_agent]
+  workflow_call:
   workflow_dispatch:
     inputs:
       content_type:

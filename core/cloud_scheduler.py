@@ -17,6 +17,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -47,7 +51,7 @@ def get_ist_time_str() -> str:
     return get_ist_now().strftime("%H:%M")
 
 
-def run_gh_cmd(args: List[str], timeout: int = 30) -> Tuple[int, str, str]:
+def run_gh_cmd(args: List[str], timeout: int = 45) -> Tuple[int, str, str]:
     """Runs a GitHub CLI command safely."""
     gh_path = shutil.which("gh")
     if not gh_path:
