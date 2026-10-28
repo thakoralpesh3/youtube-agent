@@ -282,10 +282,16 @@ class CloudScheduler:
         now_minute = self.ist_now.minute
 
         # 5. Evaluate YouTube Agent execution
-        # Target: sharp 09:00 AM IST (or catch-up anytime during the day if missed)
-        is_yt_window = now_hour >= 9  # 09:00 AM to 23:59 IST
+        import config
+        yt_upload_time = getattr(config, "DAILY_UPLOAD_TIME", "23:30")
+        try:
+            yt_hour, yt_min = map(int, yt_upload_time.split(":"))
+        except Exception:
+            yt_hour, yt_min = 23, 30
+
+        is_yt_window = (now_hour > yt_hour) or (now_hour == yt_hour and now_minute >= yt_min)
         if force_yt or (is_yt_window and not yt_status["completed_today"] and not yt_status["in_progress"]):
-            reason = "Force requested" if force_yt else f"Due at 09:00 AM IST (Current: {self.time_ist} IST, Not completed today)"
+            reason = "Force requested" if force_yt else f"Due at {yt_upload_time} IST (Current: {self.time_ist} IST, Not completed today)"
             logger.info(f"🚀 [YouTube Agent Decision] Triggering workflow. Reason: {reason}")
             self.dispatch_workflow(WORKFLOW_YOUTUBE, REPO_YOUTUBE)
         elif yt_status["completed_today"]:
@@ -293,11 +299,16 @@ class CloudScheduler:
         elif yt_status["in_progress"]:
             logger.info("⏳ [YouTube Agent Decision] YouTube agent workflow is currently running. Standing by.")
         else:
-            logger.info(f"⏳ [YouTube Agent Decision] Standing by until 09:00 AM IST (Current: {self.time_ist} IST).")
+            logger.info(f"⏳ [YouTube Agent Decision] Standing by until {yt_upload_time} IST (Current: {self.time_ist} IST).")
 
         # 6. Evaluate Channel Cleaner execution
-        # Target: >= 09:30 AM IST
-        is_cleaner_window = (now_hour == 9 and now_minute >= 30) or (now_hour > 9)
+        cleaner_time = getattr(config, "DAILY_CLEANER_TIME", "23:55")
+        try:
+            clean_hour, clean_min = map(int, cleaner_time.split(":"))
+        except Exception:
+            clean_hour, clean_min = 23, 55
+
+        is_cleaner_window = (now_hour > clean_hour) or (now_hour == clean_hour and now_minute >= clean_min)
         if clean_channel or (is_cleaner_window and yt_status["completed_today"]):
             self.run_cleaner_and_audit()
 
@@ -342,7 +353,7 @@ class CloudScheduler:
         md.append("## 📊 Autonomous 24/7 Status Overview")
         md.append("| Agent / System | Target Schedule | Today's Status | Channel / Run Details |")
         md.append("| :--- | :--- | :--- | :--- |")
-        md.append(f"| **🎬 Daily YouTube Agent** | 09:00 AM IST daily | {yt_badge} | Latest Run: `{yt.get('latest_run_id') or 'N/A'}` (`{yt.get('latest_conclusion') or yt.get('latest_status') or 'Pending'}`) |")
+        md.append(f"| **🎬 Daily YouTube Agent** | 11:30 PM IST daily | {yt_badge} | Latest Run: `{yt.get('latest_run_id') or 'N/A'}` (`{yt.get('latest_conclusion') or yt.get('latest_status') or 'Pending'}`) |")
         md.append(f"| **📱 Daily Social Agent** | 11:30 PM IST daily | {soc_badge} | Latest Run: `{soc.get('latest_run_id') or 'N/A'}` (`{soc.get('latest_conclusion') or soc.get('latest_status') or 'Pending'}`) |")
         md.append(f"| **📺 YouTube Channel Health** | 24/7 Continuous | {ch_badge} | Channel: **{ch.get('channel_title', 'Unknown')}** (Subs: {ch.get('subscribers', 0)}, Videos: {ch.get('videos', 0)}) |")
         md.append("")
@@ -360,9 +371,9 @@ class CloudScheduler:
             md.append("")
 
         md.append("### ⏰ Daily Autonomous Milestones")
-        md.append("- **09:00 AM IST**: Trilingual Shorts (EN, HI, GU) & 16:9 Landscape Video Generation & Upload.")
-        md.append("- **09:30 AM IST**: 1-Click Stuck Video Cleaner & Channel Auditor.")
+        md.append("- **11:30 PM IST**: Trilingual Shorts (EN, HI, GU) & 16:9 Landscape Video Generation & Upload.")
         md.append("- **11:30 PM IST**: Social Story Publishing (WhatsApp Status, Instagram Story, Facebook Story).")
+        md.append("- **23:55 PM IST**: 1-Click Stuck Video Cleaner & Channel Auditor.")
         md.append("- **Hourly (24/7)**: Cloud Watchdog heartbeat, queue recovery, and failure retry dispatch.")
 
         try:
