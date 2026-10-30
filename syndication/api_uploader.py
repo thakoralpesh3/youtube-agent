@@ -12,6 +12,15 @@ from typing import Any, Dict, Optional
 
 import requests
 
+# MoviePy compatibility shim for instagrapi video story uploads
+try:
+    import moviepy
+    import moviepy.editor
+    if not hasattr(moviepy, "VideoFileClip"):
+        setattr(moviepy, "VideoFileClip", moviepy.editor.VideoFileClip)
+except Exception:
+    pass
+
 import config
 from syndication.social_auth import SocialAuth
 
