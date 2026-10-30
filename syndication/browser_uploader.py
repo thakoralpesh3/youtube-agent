@@ -53,11 +53,26 @@ class BrowserUploader:
     def __init__(self):
         self.auth = SocialAuth()
         self.profile_dir = self.auth.profile_dir
-        self.gecko_path = config.BASE_DIR / ".venv" / "bin" / "geckodriver"
+        gecko_candidates = [
+            config.BASE_DIR / ".venv" / "bin" / "geckodriver",
+            Path("/usr/local/bin/geckodriver"),
+            Path("/usr/bin/geckodriver"),
+        ]
+        self.gecko_path = None
+        for cand in gecko_candidates:
+            if cand.exists() and os.access(cand, os.X_OK):
+                self.gecko_path = cand
+                break
+        if not self.gecko_path:
+            which_gecko = shutil.which("geckodriver")
+            self.gecko_path = Path(which_gecko) if which_gecko else (config.BASE_DIR / ".venv" / "bin" / "geckodriver")
+
         self.ensure_browser_network_config()
+        self.ensure_cookies_injected()
         need_sync = (not self.is_whatsapp_session_valid()) or (not self.is_social_session_valid()) or (not (self.profile_dir / "storage" / "default").exists())
         if need_sync:
             self.sync_from_user_firefox(force=True)
+            self.ensure_cookies_injected()
 
     def close(self):
         """Closes browser driver if initialized."""
@@ -93,8 +108,42 @@ class BrowserUploader:
         except Exception:
             pass
 
+    def ensure_cookies_injected(self):
+        """Ensures saved cookies from social_credentials.json (e.g. Facebook c_user, xs) are present in cookies.sqlite."""
+        cpath = self.profile_dir / "cookies.sqlite"
+        if not cpath.exists():
+            return
+        try:
+            import sqlite3
+            saved_cookies = self.auth.data.get("cookies", {})
+            fb_cookies = saved_cookies.get("facebook", {})
+            if not fb_cookies:
+                fb_cookies = {
+                    "c_user": self.auth.data.get("facebook", {}).get("user_id"),
+                    "xs": self.auth.data.get("facebook", {}).get("xs"),
+                }
+            now_us = int(time.time() * 1000000)
+            expiry = int(time.time()) + 365 * 86400
+
+            conn = sqlite3.connect(cpath)
+            cur = conn.cursor()
+            for name, val in fb_cookies.items():
+                if not val:
+                    continue
+                cur.execute("SELECT id FROM moz_cookies WHERE host LIKE '%facebook%' AND name = ?", (name,))
+                if not cur.fetchone():
+                    cur.execute("""
+                        INSERT INTO moz_cookies (originAttributes, name, value, host, path, expiry, lastAccessed, creationTime, isSecure, isHttpOnly, inBrowserElement, sameSite, schemeMap, isPartitionedAttributeSet, updateTime)
+                        VALUES ('', ?, ?, '.facebook.com', '/', ?, ?, ?, 1, 1, 0, 0, 2, 0, ?)
+                    """, (name, val, expiry, now_us, now_us, now_us))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Cookie injection notice: {e}")
+
     def is_social_session_valid(self) -> bool:
         """Verifies if the persistent profile contains authenticated Instagram/Facebook sessions."""
+        self.ensure_cookies_injected()
         cpath = self.profile_dir / "cookies.sqlite"
         if not cpath.exists():
             return False
@@ -285,7 +334,10 @@ class BrowserUploader:
         # Match standard desktop Firefox user agent to avoid headless blocking
         options.set_preference("general.useragent.override", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0")
 
-        service = Service(executable_path=str(self.gecko_path))
+        if self.gecko_path and self.gecko_path.exists():
+            service = Service(executable_path=str(self.gecko_path))
+        else:
+            service = Service()
         driver = webdriver.Firefox(service=service, options=options)
         driver.set_window_size(*viewport)
         return driver
