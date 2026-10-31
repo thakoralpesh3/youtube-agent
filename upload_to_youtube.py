@@ -439,11 +439,25 @@ def upload_all_pending(watch_mode: bool = False, max_uploads: Optional[int] = No
                 if "uploadLimitExceeded" in err_str:
                     logger.warning("⚠️ YouTube Daily Upload Limit reached on this channel account.")
                     try:
-                        notifier.send(
-                            "⏳ YouTube 24h Limit Reached",
-                            "Channel daily upload limit reached. Remaining leftovers saved safely and will resume automatically on next unlock.",
-                            urgency="normal",
-                            timeout_ms=7000,
+                        notifier.notify_agent_failure(
+                            agent_name="YouTube Agent",
+                            failure_step="YouTube Upload Limit Exceeded",
+                            error_message="Channel daily upload limit reached (uploadLimitExceeded).",
+                            details={"video": title, "path": str(vpath.name)},
+                        )
+                    except Exception:
+                        pass
+                    limit_hit = True
+                    all_uploaded = False
+                    break
+                elif "quotaExceeded" in err_str:
+                    logger.warning("⚠️ YouTube API Quota Exceeded.")
+                    try:
+                        notifier.notify_agent_failure(
+                            agent_name="YouTube Agent",
+                            failure_step="YouTube API Quota Exceeded",
+                            error_message="Daily YouTube API v3 quota (10,000 units) exhausted.",
+                            details={"video": title, "path": str(vpath.name)},
                         )
                     except Exception:
                         pass
@@ -452,6 +466,15 @@ def upload_all_pending(watch_mode: bool = False, max_uploads: Optional[int] = No
                     break
                 else:
                     logger.error(f"❌ Upload error for {vpath.name}: {e}")
+                    try:
+                        notifier.notify_agent_failure(
+                            agent_name="YouTube Agent",
+                            failure_step="YouTube Video Upload",
+                            error_message=str(e),
+                            details={"video": title, "path": str(vpath.name)},
+                        )
+                    except Exception:
+                        pass
                     all_uploaded = False
 
         if not watch_mode or all_uploaded:

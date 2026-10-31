@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import config
 
