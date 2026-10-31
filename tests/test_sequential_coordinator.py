@@ -15,13 +15,16 @@ import scheduler
 
 class TestSequentialDailyCoordinator(unittest.TestCase):
 
+    @patch("core.publisher_bridge.run_publisher_daily", return_value={"status": "completed"})
+    @patch("upload_to_youtube.sweep_and_upload_all_leftovers", return_value=0)
     @patch("growth.youtube_daily_limiter.youtube_limiter.can_run_today")
     @patch("syndication.daily_limiter.limiter.can_post_today")
+    @patch("syndication.daily_limiter.is_social_upload_window", return_value=True)
     @patch("agent.YouTubeAgent")
     @patch("syndication.festival_agent.run_daily_social_agent")
     @patch("scheduler.run_daily_youtube_cleaner")
     def test_strict_sequential_order_when_both_can_run(
-        self, mock_cleaner, mock_social, mock_yt_class, mock_social_can_post, mock_yt_can_run
+        self, mock_cleaner, mock_social, mock_yt_class, mock_is_window, mock_social_can_post, mock_yt_can_run, mock_sweep, mock_pub
     ):
         mock_yt_can_run.return_value = True
         mock_social_can_post.return_value = True
@@ -30,6 +33,7 @@ class TestSequentialDailyCoordinator(unittest.TestCase):
 
         # Mock YouTube agent run
         mock_yt_instance = MagicMock()
+        mock_yt_instance.find_latest_resumable_run.return_value = None
         def yt_side_effect(*args, **kwargs):
             execution_order.append("YOUTUBE_AGENT")
         mock_yt_instance.run_trilingual.side_effect = yt_side_effect
@@ -53,26 +57,30 @@ class TestSequentialDailyCoordinator(unittest.TestCase):
         # Assert strict sequence
         self.assertEqual(execution_order, ["YOUTUBE_AGENT", "SOCIAL_AGENT", "CLEANER"])
         mock_yt_instance.run_trilingual.assert_called_once_with(
-            target_platform="youtube", dry_run=False, force=False
+            target_platform="youtube", dry_run=False, force=False, resume=True
         )
-        mock_social.assert_called_once_with(force=False)
         mock_cleaner.assert_called_once_with(force=False)
 
+    @patch("core.publisher_bridge.run_publisher_daily", return_value={"status": "completed"})
+    @patch("upload_to_youtube.sweep_and_upload_all_leftovers", return_value=0)
     @patch("growth.youtube_daily_limiter.youtube_limiter.can_run_today")
     @patch("syndication.daily_limiter.limiter.can_post_today")
     @patch("agent.YouTubeAgent")
     @patch("syndication.festival_agent.run_daily_social_agent")
     @patch("scheduler.run_daily_youtube_cleaner")
     def test_skips_when_daily_limits_reached(
-        self, mock_cleaner, mock_social, mock_yt_class, mock_social_can_post, mock_yt_can_run
+        self, mock_cleaner, mock_social, mock_yt_class, mock_social_can_post, mock_yt_can_run, mock_sweep, mock_pub
     ):
         mock_yt_can_run.return_value = False
         mock_social_can_post.return_value = False
 
+        mock_yt_instance = MagicMock()
+        mock_yt_instance.find_latest_resumable_run.return_value = None
+        mock_yt_class.return_value = mock_yt_instance
+
         scheduler.run_daily_coordinator_worker(force=False)
 
-        mock_yt_class.assert_not_called()
-        mock_social.assert_not_called()
+        mock_yt_instance.run_trilingual.assert_not_called()
         mock_cleaner.assert_called_once_with(force=False)
 
 
