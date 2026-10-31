@@ -216,5 +216,39 @@ class DesktopNotifier:
             timeout_ms=5000,
         )
 
+    def notify_agent_failure(
+        self,
+        agent_name: str,
+        failure_step: str,
+        error_message: str,
+        details: Optional[Dict[str, Any]] = None,
+        force_whatsapp: bool = False,
+    ) -> None:
+        """
+        Dispatches dual alert notifications:
+        1. High-urgency Linux desktop banner (notify-send)
+        2. Direct WhatsApp alert message to the user's smartphone
+        """
+        # 1. Desktop notification
+        self.send(
+            f"❌ {agent_name} Failed",
+            f"Step: {failure_step}\nError: {str(error_message)[:80]}",
+            urgency="critical",
+            timeout_ms=10000,
+        )
+
+        # 2. WhatsApp notification
+        try:
+            from growth.whatsapp_notifier import whatsapp_notifier
+            whatsapp_notifier.send_failure_alert(
+                agent_name=agent_name,
+                failure_step=failure_step,
+                error_message=error_message,
+                details=details,
+                force=force_whatsapp,
+            )
+        except Exception as e:
+            logger.warning(f"Could not dispatch WhatsApp alert: {e}")
+
 
 notifier = DesktopNotifier()

@@ -38,6 +38,20 @@ def send_desktop_notification(title: str, message: str, icon_path: Optional[str]
         logger.debug(f"Desktop notification notice: {e}")
 
 
+def send_failure_alert(failure_step: str, error_message: str, details: Optional[Dict[str, Any]] = None) -> None:
+    """Dispatches actionable failure alert to user via Desktop and WhatsApp."""
+    try:
+        from growth.notifier import notifier
+        notifier.notify_agent_failure(
+            agent_name="YouTube Agent",
+            failure_step=failure_step,
+            error_message=error_message,
+            details=details,
+        )
+    except Exception as e:
+        logger.debug(f"WhatsApp failure notification notice: {e}")
+
+
 
 class YouTubeAgent:
     def __init__(self, model: Optional[str] = None):
@@ -250,6 +264,14 @@ class YouTubeAgent:
                 "thumbnail_path": str(thumbnail_path.resolve()),
             }
             report(100, f"Dry run complete! Video saved: {final_video_path.name}", 6)
+
+        # Dispatch failure alert if live upload was requested but deferred/failed
+        if not dry_run and upload_result.get("status") in ("QUEUED_LOCALLY", "SAVED_LOCALLY_NEEDS_AUTH", "FAILED"):
+            send_failure_alert(
+                failure_step="Standard 16:9 Video Upload",
+                error_message=f"Standard video generated but could not be published live to YouTube ({upload_result.get('status')}: {upload_result.get('error', 'Authentication or Quota limit')})",
+                details={"title": script.title, "status": upload_result.get("status")},
+            )
 
         # Save / update summary.json
         sum_file = run_dir / "summary.json"
@@ -783,6 +805,16 @@ class YouTubeAgent:
                         "video_path": str(vid_path.resolve()),
                     }
 
+            # Check if all YouTube Shorts uploads failed or were deferred
+            if not dry_run and upload_results:
+                successful_shorts = [res for res in upload_results.values() if res.get("video_url") or res.get("video_id")]
+                if not successful_shorts:
+                    first_reason = next((res.get("reason") or res.get("status") for res in upload_results.values()), "Upload deferred/failed")
+                    send_failure_alert(
+                        failure_step="YouTube Shorts Upload",
+                        error_message=f"All trilingual Shorts (EN, HI, GU) could not be published to YouTube: {first_reason}",
+                        details={"topic": package.topic, "upload_results": {k: v.get("status") for k, v in upload_results.items()}},
+                    )
         else:
             logger.info("⏩ [Step 5.1] Skipping YouTube upload (Target: Social only)")
 
@@ -804,6 +836,11 @@ class YouTubeAgent:
                 )
             except Exception as vid_err:
                 logger.error(f"⚠️ Error generating standard YouTube video: {vid_err}", exc_info=True)
+                send_failure_alert(
+                    failure_step="Standard YouTube Video Generation",
+                    error_message=str(vid_err),
+                    details={"topic": package.topic},
+                )
                 video_result = {"status": "FAILED", "error": str(vid_err)}
 
         # -------------------------------------------------------------
@@ -1008,24 +1045,29 @@ def main():
 
     agent = YouTubeAgent(model=args.model)
 
-    if args.run_now and not args.trilingual:
-        agent.run(
-            topic=args.topic,
-            niche=args.niche,
-            dry_run=args.dry_run,
-            content_type=content_type,
-            resume=not args.no_resume,
-        )
-    else:
-        # Run trilingual with specified target platform and content type
-        agent.run_trilingual(
-            topic=args.topic,
-            dry_run=args.dry_run,
-            target_platform=args.platform,
-            content_type=content_type,
-            force=args.force,
-            resume=not args.no_resume,
-        )
+    try:
+        if args.run_now and not args.trilingual:
+            agent.run(
+                topic=args.topic,
+                niche=args.niche,
+                dry_run=args.dry_run,
+                content_type=content_type,
+                resume=not args.no_resume,
+            )
+        else:
+            # Run trilingual with specified target platform and content type
+            agent.run_trilingual(
+                topic=args.topic,
+                dry_run=args.dry_run,
+                target_platform=args.platform,
+                content_type=content_type,
+                force=args.force,
+                resume=not args.no_resume,
+            )
+    except Exception as e:
+        logger.error(f"❌ YouTube Agent execution terminated with error: {e}", exc_info=True)
+        send_failure_alert("Agent Execution Crash", str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

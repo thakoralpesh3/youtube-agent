@@ -147,3 +147,26 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "chamunda2026")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# WhatsApp Failure Alerts & Notifications
+ENABLE_WHATSAPP_ALERTS = os.getenv("ENABLE_WHATSAPP_ALERTS", "true").lower() in ("1", "true", "yes")
+WHATSAPP_TARGET_PHONE = os.getenv("WHATSAPP_TARGET_PHONE", "").strip()
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", os.getenv("META_ACCESS_TOKEN", "")).strip()
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+CALLMEBOT_PHONE = os.getenv("CALLMEBOT_PHONE", "").strip()
+CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY", "").strip()
+
+# Attempt loading target phone from social_credentials.json if missing in .env
+if not WHATSAPP_TARGET_PHONE:
+    try:
+        import json
+        _sc_file = BASE_DIR / "social_credentials.json"
+        if _sc_file.exists():
+            _sc_data = json.loads(_sc_file.read_text(encoding="utf-8"))
+            WHATSAPP_TARGET_PHONE = _sc_data.get("whatsapp", {}).get("target_phone", "").strip()
+            if not WHATSAPP_TOKEN:
+                WHATSAPP_TOKEN = _sc_data.get("whatsapp", {}).get("token", "").strip()
+            if not WHATSAPP_PHONE_NUMBER_ID:
+                WHATSAPP_PHONE_NUMBER_ID = _sc_data.get("whatsapp", {}).get("phone_number_id", "").strip()
+    except Exception:
+        pass
+

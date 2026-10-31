@@ -139,7 +139,12 @@ def run_daily_social_worker(force: bool = False):
         logger.error(f"❌ [11:30 PM Social Worker] Error during 11:30 PM social publishing: {e}", exc_info=True)
         try:
             from growth.notifier import notifier
-            notifier.send("⚠️ Social 11:30 PM Notice", f"Social publishing notice: {str(e)[:80]}", urgency="normal")
+            notifier.notify_agent_failure(
+                agent_name="Social Media Agent",
+                failure_step="11:30 PM Daily Social Publishing",
+                error_message=str(e),
+                details={"date": today_str},
+            )
         except Exception:
             pass
     finally:
@@ -205,7 +210,12 @@ def run_daily_coordinator_worker(force: bool = False):
             logger.error(f"❌ [Step 1/4: YouTube Agent] Error in daily YouTube pipeline: {e}", exc_info=True)
             try:
                 from growth.notifier import notifier
-                notifier.send("⚠️ YouTube Agent Error", f"Daily run encountered notice: {str(e)[:80]}", urgency="normal")
+                notifier.notify_agent_failure(
+                    agent_name="YouTube Agent",
+                    failure_step="Daily YouTube Pipeline (Step 1/4)",
+                    error_message=str(e),
+                    details={"date": today_str},
+                )
             except Exception:
                 pass
 
@@ -229,7 +239,12 @@ def run_daily_coordinator_worker(force: bool = False):
             logger.error(f"❌ [Step 2/4: Social AI Agent] Error in daily Social step: {e}", exc_info=True)
             try:
                 from growth.notifier import notifier
-                notifier.send("⚠️ Social Agent Notice", f"Daily social notice: {str(e)[:80]}", urgency="normal")
+                notifier.notify_agent_failure(
+                    agent_name="Social Media Agent",
+                    failure_step="Daily Social Step (Step 2/4)",
+                    error_message=str(e),
+                    details={"date": today_str},
+                )
             except Exception:
                 pass
 

@@ -264,6 +264,12 @@ class FestivalSocialAgent:
                         ["whatsapp", "instagram", "facebook"],
                         "Saved to retry queue"
                     )
+                    notifier.notify_agent_failure(
+                        agent_name="Social Media Agent",
+                        failure_step="Daily Story & Status Publishing",
+                        error_message=f"Neither video nor poster could be published live to Instagram, Facebook, or WhatsApp for {festival.festival_name}.",
+                        details={"festival": festival.festival_name, "poster": str(poster_path.name), "video": str(video_path.name)},
+                    )
                 except Exception:
                     pass
 
