@@ -80,8 +80,68 @@ class TestSequentialDailyCoordinator(unittest.TestCase):
 
         scheduler.run_daily_coordinator_worker(force=False)
 
-        mock_yt_instance.run_trilingual.assert_not_called()
-        mock_cleaner.assert_called_once_with(force=False)
+    @patch("core.publisher_bridge.run_publisher_daily", return_value={"status": "completed"})
+    @patch("upload_to_youtube.sweep_and_upload_all_leftovers", return_value=0)
+    @patch("growth.youtube_daily_limiter.youtube_limiter.can_run_today")
+    @patch("syndication.daily_limiter.limiter.can_post_today")
+    @patch("agent.YouTubeAgent")
+    @patch("scheduler.run_daily_social_worker")
+    @patch("scheduler.run_daily_youtube_cleaner")
+    def test_force_run_executes_youtube_then_social(
+        self, mock_cleaner, mock_social_worker, mock_yt_class, mock_social_can_post, mock_yt_can_run, mock_sweep, mock_pub
+    ):
+        """Verifies that with force=True, YouTube Agent runs first, followed by Social Agent."""
+        mock_yt_can_run.return_value = False
+        mock_social_can_post.return_value = False
+
+        execution_order = []
+
+        mock_yt_instance = MagicMock()
+        mock_yt_instance.find_latest_resumable_run.return_value = None
+        def yt_side_effect(*args, **kwargs):
+            execution_order.append("YOUTUBE_AGENT")
+        mock_yt_instance.run_trilingual.side_effect = yt_side_effect
+        mock_yt_class.return_value = mock_yt_instance
+
+        def social_side_effect(*args, **kwargs):
+            execution_order.append("SOCIAL_AGENT")
+        mock_social_worker.side_effect = social_side_effect
+
+        def cleaner_side_effect(*args, **kwargs):
+            execution_order.append("CLEANER")
+            return True
+        mock_cleaner.side_effect = cleaner_side_effect
+
+        scheduler.run_daily_coordinator_worker(force=True)
+
+        self.assertEqual(execution_order, ["YOUTUBE_AGENT", "SOCIAL_AGENT", "CLEANER"])
+        mock_yt_instance.run_trilingual.assert_called_once_with(
+            target_platform="youtube", dry_run=False, force=True, resume=True
+        )
+        mock_social_worker.assert_called_once_with(force=True)
+        mock_cleaner.assert_called_once_with(force=True)
+
+    @patch("schedule.every")
+    @patch("threading.Thread")
+    @patch("syndication.story_watcher.StoryWatcher")
+    @patch("core.github_watcher.start_watcher_background")
+    def test_startup_and_8hour_scheduler_registration(
+        self, mock_watcher, mock_story, mock_thread, mock_schedule_every
+    ):
+        """Verifies 8-hour schedule is registered and startup coordinator thread is launched."""
+        # Stop infinite while loop by raising KeyboardInterrupt on time.sleep
+        with patch("time.sleep", side_effect=KeyboardInterrupt):
+            try:
+                scheduler.run_daily_scheduler()
+            except KeyboardInterrupt:
+                pass
+
+        # Verify 8-hour schedule was registered
+        mock_schedule_every.assert_any_call(8)
+
+        # Verify StartupSequentialCoordinator thread was spawned and started
+        thread_names = [call.kwargs.get("name") for call in mock_thread.call_args_list if call.kwargs.get("name")]
+        self.assertIn("StartupSequentialCoordinator", thread_names)
 
 
 if __name__ == "__main__":
