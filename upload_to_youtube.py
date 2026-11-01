@@ -194,6 +194,9 @@ def get_pending_videos() -> List[Dict[str, Any]]:
                 if vpath.exists() and vpath not in seen_paths:
                     seen_paths.add(vpath)
                     sdata = data.get("script_data", {})
+                    if "thumbnail_path" not in sdata and data.get("thumbnail_path"):
+                        sdata["thumbnail_path"] = data["thumbnail_path"]
+                    is_standard = vpath.name.startswith("final_video") and not vpath.name.startswith("final_short")
                     lang_code = sdata.get("language") or ("hi" if "_hi" in vpath.stem else ("gu" if "_gu" in vpath.stem else "en"))
                     pending.append({
                         "video_path": vpath,
@@ -201,6 +204,7 @@ def get_pending_videos() -> List[Dict[str, Any]]:
                         "source_json": qf,
                         "run_dir": vpath.parent,
                         "lang": lang_code,
+                        "is_standard": is_standard,
                     })
             except Exception as e:
                 logger.debug(f"Error reading queue file {qf.name}: {e}")

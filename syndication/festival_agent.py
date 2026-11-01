@@ -221,21 +221,53 @@ class FestivalSocialAgent:
 
             # Upload video to Story / Status (force=True to allow both video & greeting card in festival package)
             try:
-                if video_path.exists():
+                if video_path and video_path.exists():
                     vid_ok = self.story_watcher.process_file(video_path, force=True)
                     upload_results["video"] = "PUBLISHED" if vid_ok else "STORED_FOR_RETRY"
+                    if not vid_ok and video_path.exists():
+                        self.story_watcher.queue_manager.enqueue_failed(
+                            media_path=video_path,
+                            caption=caption,
+                            target_platforms=["instagram", "facebook", "whatsapp"],
+                            failed_platforms={"general": "Upload incomplete"},
+                            metadata={"source": "festival_video", "festival": festival.festival_name},
+                        )
             except Exception as e:
                 logger.warning(f"Video upload notice: {e}")
-                upload_results["video"] = f"NOTICE: {e}"
+                upload_results["video"] = f"STORED_FOR_RETRY: {e}"
+                if video_path and video_path.exists():
+                    self.story_watcher.queue_manager.enqueue_failed(
+                        media_path=video_path,
+                        caption=caption,
+                        target_platforms=["instagram", "facebook", "whatsapp"],
+                        failed_platforms={"general": str(e)},
+                        metadata={"source": "festival_video", "festival": festival.festival_name},
+                    )
 
             # Upload poster image to Story / Feed (force=True to allow both video & greeting card in festival package)
             try:
-                if poster_path.exists():
+                if poster_path and poster_path.exists():
                     post_ok = self.story_watcher.process_file(poster_path, force=True)
                     upload_results["poster"] = "PUBLISHED" if post_ok else "STORED_FOR_RETRY"
+                    if not post_ok and poster_path.exists():
+                        self.story_watcher.queue_manager.enqueue_failed(
+                            media_path=poster_path,
+                            caption=caption,
+                            target_platforms=["instagram", "facebook", "whatsapp"],
+                            failed_platforms={"general": "Upload incomplete"},
+                            metadata={"source": "festival_poster", "festival": festival.festival_name},
+                        )
             except Exception as e:
                 logger.warning(f"Poster upload notice: {e}")
-                upload_results["poster"] = f"NOTICE: {e}"
+                upload_results["poster"] = f"STORED_FOR_RETRY: {e}"
+                if poster_path and poster_path.exists():
+                    self.story_watcher.queue_manager.enqueue_failed(
+                        media_path=poster_path,
+                        caption=caption,
+                        target_platforms=["instagram", "facebook", "whatsapp"],
+                        failed_platforms={"general": str(e)},
+                        metadata={"source": "festival_poster", "festival": festival.festival_name},
+                    )
 
             if vid_ok or post_ok:
                 # 8. Mark Campaign as Posted in History only if at least one succeeded
