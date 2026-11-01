@@ -138,6 +138,16 @@ class FestivalSocialAgent:
         logger.info(f"🏍️ Campaign: Chamunda Automobile Parts & Services (Royal Enfield Only)")
         logger.info("=" * 65)
 
+        # 0. Check for and upload all stored/pending stories across Instagram, Facebook & WhatsApp
+        try:
+            from syndication.social_queue import SocialQueueManager
+            qm = SocialQueueManager()
+            leftover_res = qm.sweep_and_publish_all_leftover_stories(max_items=10)
+            if leftover_res.get("published_count", 0) > 0:
+                logger.info(f"✨ [Social Agent Startup] Leftover sweep published {leftover_res['published_count']} stored story item(s)!")
+        except Exception as sweep_err:
+            logger.debug(f"Stored social content sweep notice: {sweep_err}")
+
         # 3. Check if already posted today
         if not force_upload and self.detector.is_campaign_posted(today_str, festival.festival_name):
             logger.info(f"⏩ [Festival Agent] Campaign for '{festival.festival_name}' was already published today. Skipping duplicate.")

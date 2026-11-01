@@ -320,6 +320,15 @@ class YouTubeAgent:
         self.self_healer.auto_repair()
         self.growth_engine.evolve_channel_strategy()
 
+        # Check for and upload all stored/pending videos from earlier sessions before new generation
+        try:
+            from upload_to_youtube import sweep_and_upload_all_leftovers
+            leftovers_swept = sweep_and_upload_all_leftovers()
+            if leftovers_swept > 0:
+                logger.info(f"🎉 [YouTube Agent Startup] Successfully uploaded {leftovers_swept} stored/pending video(s) to YouTube channel!")
+        except Exception as sweep_err:
+            logger.debug(f"Stored YouTube content sweep notice: {sweep_err}")
+
         # Check for resumable incomplete run
         resumable_run = self.find_latest_resumable_run() if (resume and not topic) else None
         if resumable_run:
@@ -566,6 +575,15 @@ class YouTubeAgent:
         Guarantees strictly 1 run per calendar day unless force=True.
         Supports full fault-tolerant checkpoint resumption across all steps.
         """
+        # Check for and upload all stored/pending videos from earlier sessions before new generation
+        try:
+            from upload_to_youtube import sweep_and_upload_all_leftovers
+            leftovers_swept = sweep_and_upload_all_leftovers()
+            if leftovers_swept > 0:
+                logger.info(f"🎉 [YouTube Agent Startup] Successfully uploaded {leftovers_swept} stored/pending video(s) to YouTube channel!")
+        except Exception as sweep_err:
+            logger.debug(f"Stored YouTube content sweep notice: {sweep_err}")
+
         # Check for resumable incomplete run FIRST before daily quota check
         resumable_run = self.find_latest_resumable_run(trilingual=True) if (resume and not topic) else None
 

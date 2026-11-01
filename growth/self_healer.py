@@ -183,22 +183,38 @@ class SelfHealer:
 
         return repairs
 
-    def queue_for_later(self, video_path: Path, script_data: dict) -> Path:
+    def queue_for_later(self, video_path: Path, script_data: dict, error_reason: Optional[str] = None) -> Path:
         """
-        Saves video metadata to pending queue if YouTube upload hits a temporary network error or quota.
+        Saves video metadata to pending queue if YouTube upload fails for any reason
+        (network error, quota exhausted, token expired, channel rate limit).
+        Uses unique per-video filenames to prevent collision in multi-language or standard video runs.
         """
-        timestamp = Path(video_path).parent.name
-        queue_item = self.queue_dir / f"pending_{timestamp}.json"
-        
+        vpath = Path(video_path)
+        timestamp = vpath.parent.name
+        stem = vpath.stem
+        queue_item = self.queue_dir / f"pending_{timestamp}_{stem}.json"
+
+        # Check for associated thumbnail
+        thumbnail_path = None
+        cand_thumb = vpath.parent / "thumbnail.jpg"
+        if cand_thumb.exists() and cand_thumb.stat().st_size > 1000:
+            thumbnail_path = str(cand_thumb.resolve())
+        elif isinstance(script_data, dict) and script_data.get("thumbnail_path"):
+            thumbnail_path = str(script_data["thumbnail_path"])
+
         payload = {
-            "video_path": str(video_path.resolve()),
+            "video_path": str(vpath.resolve()),
             "script_data": script_data,
+            "thumbnail_path": thumbnail_path,
             "queued_at": str(timestamp),
+            "stem": stem,
+            "error_reason": error_reason or "Deferred upload",
         }
+        self.queue_dir.mkdir(parents=True, exist_ok=True)
         with open(queue_item, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-        logger.info(f"💾 Video successfully queued for deferred upload: {queue_item.name}")
+        logger.info(f"💾 Video successfully stored in pending queue for deferred upload: {queue_item.name}")
         return queue_item
 
     def cleanup_media(self, run_dir: Path, video_path: Optional[Path] = None) -> None:

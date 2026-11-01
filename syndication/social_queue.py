@@ -154,28 +154,25 @@ class SocialQueueManager:
         return queue_item
 
     def get_pending_items(self) -> List[Dict[str, Any]]:
-        """Returns all items currently awaiting retry (auto-archives items older than 24h)."""
+        """
+        Returns all items currently awaiting retry.
+        Preserves all stored content indefinitely until successfully published across all target platforms.
+        """
         items = self.load_queue()
         pending = []
         needs_save = False
-        now = datetime.datetime.now()
         for item in items:
-            if item.get("status") == "PENDING" and item.get("pending_platforms"):
+            # Auto-reactivate any items previously marked ARCHIVED_STALE if media still exists
+            if item.get("status") in ("PENDING", "ARCHIVED_STALE") and item.get("pending_platforms"):
                 mpath = Path(item.get("media_path", ""))
-                created_str = item.get("created_at")
-                is_stale = False
-                if created_str:
-                    try:
-                        created_dt = datetime.datetime.strptime(created_str, "%Y-%m-%d %H:%M:%S")
-                        if (now - created_dt).total_seconds() > 86400:  # older than 24h
-                            is_stale = True
-                    except Exception:
-                        pass
-
-                if is_stale or not mpath.exists():
-                    item["status"] = "ARCHIVED_STALE"
+                if not mpath.exists():
+                    item["status"] = "FILE_MISSING"
                     needs_save = True
                     continue
+
+                if item.get("status") == "ARCHIVED_STALE":
+                    item["status"] = "PENDING"
+                    needs_save = True
 
                 pending.append(item)
 
