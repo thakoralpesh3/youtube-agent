@@ -612,48 +612,60 @@ def run_daily_scheduler():
     schedule.every().day.at(cleaner_time).do(run_daily_youtube_cleaner)
     logger.info(f"🧹 [Daily Cleaner] Scheduled daily at {cleaner_time} IST (1-Click Stuck Video Cleaner & Channel Auditor)")
 
+    # Schedule recurring sequential coordinator every 8 hours (Strict order: [1] YouTube Agent ➔ [2] Social Agent)
+    autorun_interval = getattr(config, "AUTORUN_INTERVAL_HOURS", 8)
+    schedule.every(autorun_interval).hours.do(
+        lambda: threading.Thread(
+            target=run_daily_coordinator_worker,
+            kwargs={"force": True},
+            daemon=True,
+            name="8HourSequentialCoordinator",
+        ).start()
+    )
+    logger.info(f"⏱️ [8-Hour Auto-Run] Scheduled sequential coordinator every {autorun_interval} hours (Strict Order: [1] YouTube Agent ➔ [2] Social Agent)")
+
     # Schedule hourly self-run (checks pending uploads & system health every 1 hour)
     schedule.every(1).hours.do(hourly_cycle)
 
-    # Check on startup (e.g. laptop turned on): if today's sequential workflow is pending OR leftovers exist, run immediately!
-    # Order: [1] YouTube Agent & Leftovers strictly first -> [2] Social AI Agent at 11:30 PM -> [3] Cleaner
-    try:
-        from growth.youtube_daily_limiter import youtube_limiter
-        from syndication.daily_limiter import limiter as social_limiter, is_social_upload_window
-        from upload_to_youtube import get_pending_videos
-        from syndication.social_queue import SocialQueueManager
+    # Automatically execute on startup in background:
+    # Strictly runs: [1] YouTube Agent strictly first -> [2] Social Media Agent -> [3] Cleaner -> [4] PublisheR AI
+    autorun_on_startup = getattr(config, "AUTORUN_ON_STARTUP", True)
+    if autorun_on_startup:
+        logger.info(
+            "🚀 [Startup Coordinator] Laptop started / service initialized! Automatically triggering sequential execution in background: "
+            "[1] YouTube Agent strictly first ➔ [2] Social Media Agent (WhatsApp Status, Instagram & Facebook Stories)"
+        )
+        threading.Thread(
+            target=run_daily_coordinator_worker,
+            kwargs={"force": True},
+            daemon=True,
+            name="StartupSequentialCoordinator",
+        ).start()
+    else:
+        try:
+            from growth.youtube_daily_limiter import youtube_limiter
+            from syndication.daily_limiter import limiter as social_limiter, is_social_upload_window
+            from upload_to_youtube import get_pending_videos
+            from syndication.social_queue import SocialQueueManager
 
-        has_leftover_yt = len(get_pending_videos()) > 0
-        has_leftover_soc = len(SocialQueueManager().get_pending_items()) > 0
-        yt_needed = (youtube_limiter.can_run_today() and is_youtube_upload_window()) or has_leftover_yt
-        soc_needed = (social_limiter.can_post_today() or has_leftover_soc) and is_social_upload_window()
+            has_leftover_yt = len(get_pending_videos()) > 0
+            has_leftover_soc = len(SocialQueueManager().get_pending_items()) > 0
+            yt_needed = (youtube_limiter.can_run_today() and is_youtube_upload_window()) or has_leftover_yt
+            soc_needed = (social_limiter.can_post_today() or has_leftover_soc) and is_social_upload_window()
 
-        if yt_needed:
-            logger.info(
-                f"🚀 [Startup Coordinator] Laptop started after 11:30 PM with pending YouTube tasks (can_run: {youtube_limiter.can_run_today()}, "
-                f"leftovers: {has_leftover_yt}). Coordinating daily execution..."
-            )
-            cloud_dispatch = getattr(config, "DISPATCH_TO_GITHUB_ACTIONS", False)
-            if cloud_dispatch and youtube_limiter.can_run_today():
-                workflow = getattr(config, "GITHUB_YOUTUBE_WORKFLOW", "daily_youtube_agent.yml")
-                repo = getattr(config, "GITHUB_REPO", "thakoralpesh3/youtube-agent")
-                logger.info(f"🚀 [Startup Coordinator] Dispatching '{workflow}' to GitHub Actions...")
-                if dispatch_github_workflow(workflow_name=workflow, repo=repo):
-                    youtube_limiter.record_run(topic="github_actions_cloud_dispatch", run_id="startup_cloud_dispatch")
-                else:
-                    run_daily_pipelines_if_needed(force=False, background=True)
+            if yt_needed:
+                logger.info(
+                    f"🚀 [Startup Coordinator] Pending YouTube tasks (can_run: {youtube_limiter.can_run_today()}, "
+                    f"leftovers: {has_leftover_yt}). Coordinating daily execution..."
+                )
+                run_daily_coordinator_worker(force=False)
+            elif soc_needed:
+                logger.info("🚀 [Startup Coordinator] Social upload pending! Launching worker...")
+                threading.Thread(target=run_daily_social_worker, args=(False,), daemon=True, name="StartupSocialWorker").start()
             else:
-                run_daily_pipelines_if_needed(force=False, background=True)
-        elif soc_needed:
-            logger.info(
-                f"🚀 [Startup Coordinator] Laptop started after 11:30 PM and social upload pending! "
-                f"Launching sharp 11:30 PM social publishing worker..."
-            )
-            threading.Thread(target=run_daily_social_worker, args=(False,), daemon=True, name="StartupSocialWorker").start()
-        else:
-            logger.info(f"✅ [Startup Coordinator] Today's daily workflow is standing by for sharp 11:30 PM IST (Scheduled: {upload_time} IST).")
-    except Exception as e:
-        logger.warning(f"Startup coordinator check notice: {e}")
+                logger.info(f"✅ [Startup Coordinator] Standing by for scheduled upload time ({upload_time} IST).")
+        except Exception as e:
+            logger.warning(f"Startup coordinator check notice: {e}")
 
     # Run hourly cycle on startup in a separate background thread (checks pending uploads, story folder, security audit)
     threading.Thread(target=hourly_cycle, daemon=True, name="StartupHourlyCycle").start()
