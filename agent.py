@@ -828,11 +828,20 @@ class YouTubeAgent:
                 successful_shorts = [res for res in upload_results.values() if res.get("video_url") or res.get("video_id")]
                 if not successful_shorts:
                     first_reason = next((res.get("reason") or res.get("status") for res in upload_results.values()), "Upload deferred/failed")
-                    send_failure_alert(
-                        failure_step="YouTube Shorts Upload",
-                        error_message=f"All trilingual Shorts (EN, HI, GU) could not be published to YouTube: {first_reason}",
-                        details={"topic": package.topic, "upload_results": {k: v.get("status") for k, v in upload_results.items()}},
-                    )
+                    if first_reason in ("SAVED_LOCALLY_PENDING", "TOKEN_EXPIRED") or "token" in str(first_reason).lower() or "auth" in str(first_reason).lower():
+                        from growth.notifier import notifier
+                        notifier.send(
+                            "⚠️ YouTube Login Required",
+                            "Videos generated & safely queued. Run 'python3 upload_to_youtube.py' in terminal to publish.",
+                            urgency="critical",
+                            timeout_ms=10000,
+                        )
+                    else:
+                        send_failure_alert(
+                            failure_step="YouTube Shorts Upload",
+                            error_message=f"All trilingual Shorts (EN, HI, GU) could not be published to YouTube: {first_reason}",
+                            details={"topic": package.topic, "upload_results": {k: v.get("status") for k, v in upload_results.items()}},
+                        )
         else:
             logger.info("⏩ [Step 5.1] Skipping YouTube upload (Target: Social only)")
 
