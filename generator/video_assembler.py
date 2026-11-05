@@ -307,11 +307,28 @@ class VideoAssembler:
 
             out_mp4 = temp_dir / f"scene_{i + 1:02d}.mp4"
             if out_mp4.exists() and out_mp4.stat().st_size > 10000:
-                logger.info(f"⚡ Checkpoint found: Reusing rendered clip {out_mp4.name}")
-                if callback:
-                    callback(i + 1, total_scenes, f"Reused rendered clip {i + 1}/{total_scenes}")
-                scene_mp4_files.append(out_mp4)
-                continue
+                is_valid = True
+                try:
+                    chk = subprocess.run(
+                        [self.ffmpeg_bin, "-v", "error", "-i", str(out_mp4), "-f", "null", "-"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=10,
+                    )
+                    if chk.returncode != 0:
+                        is_valid = False
+                except Exception:
+                    is_valid = False
+
+                if is_valid:
+                    logger.info(f"⚡ Checkpoint found: Reusing rendered clip {out_mp4.name}")
+                    if callback:
+                        callback(i + 1, total_scenes, f"Reused rendered clip {i + 1}/{total_scenes}")
+                    scene_mp4_files.append(out_mp4)
+                    continue
+                else:
+                    logger.warning(f"⚠️ Corrupted clip detected: {out_mp4.name}. Re-rendering scene...")
+                    out_mp4.unlink(missing_ok=True)
 
             if callback:
                 callback(i + 1, total_scenes, f"Rendering video scene {i + 1}/{total_scenes} ({orientation.upper()}, {lang.upper()})")
