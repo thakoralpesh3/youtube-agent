@@ -679,4 +679,25 @@ def run_daily_scheduler():
 
 
 if __name__ == "__main__":
-    run_daily_scheduler()
+    import argparse
+    parser = argparse.ArgumentParser(description="YouTube & Social Media Agent Scheduler Daemon")
+    parser.add_argument("--social-now", action="store_true", help="Force immediate Social Media daily publishing (WhatsApp, Instagram, Facebook stories)")
+    parser.add_argument("--youtube-now", action="store_true", help="Force immediate YouTube Agent run")
+    parser.add_argument("--clean-now", action="store_true", help="Force immediate YouTube cleaner run")
+    parser.add_argument("--sweep-stories", action="store_true", help="Sweep and publish all pending leftover stories")
+    args = parser.parse_args()
+
+    if args.social_now:
+        run_daily_social_worker(force=True)
+    elif args.youtube_now:
+        from agent import YouTubeAgent
+        YouTubeAgent().run_trilingual(force=True)
+    elif args.clean_now:
+        from youtube.cleaner import YouTubeCleaner
+        YouTubeCleaner().run_cleaner()
+    elif args.sweep_stories:
+        from syndication.social_queue import SocialQueueManager
+        res = SocialQueueManager().sweep_and_publish_all_leftover_stories(force=True)
+        print("Sweep result:", res)
+    else:
+        run_daily_scheduler()
