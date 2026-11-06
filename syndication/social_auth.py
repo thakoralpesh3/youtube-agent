@@ -34,8 +34,8 @@ class SocialAuth:
                 "is_authenticated": False,
             },
             "facebook": {
-                "page_access_token": os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN") or os.getenv("META_ACCESS_TOKEN", ""),
-                "page_id": os.getenv("FACEBOOK_PAGE_ID", ""),
+                "page_access_token": os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN") or os.getenv("FB_PAGE_ACCESS_TOKEN") or os.getenv("META_ACCESS_TOKEN", ""),
+                "page_id": os.getenv("FACEBOOK_PAGE_ID") or os.getenv("FB_PAGE_ID", ""),
                 "is_authenticated": False,
             },
             "whatsapp": {
@@ -94,7 +94,11 @@ class SocialAuth:
     def is_facebook_ready(self) -> bool:
         fb = self.data.get("facebook", {})
         browser = self.data.get("browser_session", {})
-        has_api = bool((fb.get("page_access_token") and fb.get("page_id")) or fb.get("user_id") or fb.get("xs"))
+        has_api = bool(
+            (fb.get("page_access_token") or os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN") or os.getenv("FB_PAGE_ACCESS_TOKEN") or os.getenv("META_ACCESS_TOKEN"))
+            and (fb.get("page_id") or os.getenv("FACEBOOK_PAGE_ID") or os.getenv("FB_PAGE_ID"))
+            or fb.get("user_id") or fb.get("xs")
+        )
         has_browser = bool(browser.get("facebook_logged_in") or browser.get("first_setup_done"))
         return has_api or has_browser
 
