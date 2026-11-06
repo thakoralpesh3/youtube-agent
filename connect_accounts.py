@@ -124,14 +124,22 @@ def check_instagram_and_facebook() -> bool:
                 has_fb = True
             conn.close()
 
-        ig_status = "✅ Connected" if has_ig else "⚠️ Login Needed"
-        fb_status = "✅ Connected" if has_fb else "⚠️ Login Needed"
-        console.print(f"{'✅' if has_ig else '⚠️'} [bold {'green' if has_ig else 'yellow'}]Instagram (royal_chamunda_auto):[/bold {'green' if has_ig else 'yellow'}] {ig_status}")
-        console.print(f"{'✅' if has_fb else '⚠️'} [bold {'green' if has_fb else 'yellow'}]Facebook (Chamunda Auto):[/bold {'green' if has_fb else 'yellow'}] {fb_status}")
+        from syndication.social_auth import SocialAuth
+        sa = SocialAuth()
+        meta_creds = sa.get_meta_credentials()
+        has_fb_api = bool((meta_creds.get("fb_page_token") or meta_creds.get("meta_access_token")) and meta_creds.get("fb_page_id"))
+        has_ig_api = bool((meta_creds.get("ig_token") and meta_creds.get("ig_account_id")) or sa.data.get("instagram", {}).get("sessionid"))
 
+        ig_status = "✅ Connected (API Direct Protocol)" if has_ig_api else ("✅ Connected (Browser)" if has_ig else "⚠️ Login Needed")
+        fb_status = "✅ Connected (Graph API Direct)" if has_fb_api else ("✅ Connected (Browser Session)" if has_fb else "⚠️ Login Needed")
+        console.print(f"{'✅' if (has_ig or has_ig_api) else '⚠️'} [bold {'green' if (has_ig or has_ig_api) else 'yellow'}]Instagram (royal_chamunda_auto):[/bold {'green' if (has_ig or has_ig_api) else 'yellow'}] {ig_status}")
+        console.print(f"{'✅' if (has_fb or has_fb_api) else '⚠️'} [bold {'green' if (has_fb or has_fb_api) else 'yellow'}]Facebook (Chamunda Auto):[/bold {'green' if (has_fb or has_fb_api) else 'yellow'}] {fb_status}")
+
+        if not has_fb_api:
+            console.print("💡 [dim]To post to Facebook via 100% headless API: Add FACEBOOK_PAGE_ID & FACEBOOK_PAGE_ACCESS_TOKEN to .env[/dim]")
         if not has_ig or not has_fb:
             console.print("💡 Tip: To log in with 1-click in Firefox, run: [bold cyan]python3 connect_accounts.py --login-browser[/bold cyan]")
-        return has_ig and has_fb
+        return (has_ig or has_ig_api) and (has_fb or has_fb_api)
     except Exception as e:
         console.print(f"❌ [bold red]Social Accounts:[/bold red] Error: {e}")
         return False

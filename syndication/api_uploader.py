@@ -138,10 +138,11 @@ class DirectSocialApiUploader:
         if not media_path.exists():
             return {"status": "FAILED", "platform": "instagram", "reason": "Media file missing"}
 
+        self.creds = self.auth.get_meta_credentials()
         is_video = media_path.suffix.lower() in [".mp4", ".mov", ".avi", ".webm"]
 
         # Strategy A: Meta Graph API (if configured)
-        if self.creds.get("meta_access_token") and self.creds.get("ig_account_id"):
+        if (self.creds.get("ig_token") or self.creds.get("meta_access_token")) and self.creds.get("ig_account_id"):
             try:
                 from syndication.story_publisher import StoryPublisher
                 pub = StoryPublisher()
@@ -187,13 +188,15 @@ class DirectSocialApiUploader:
     # --------------------------------------------------------------------------
     def post_facebook_direct(self, media_path: Path, caption: str = "") -> Dict[str, Any]:
         """
-        Directly uploads image/video to Facebook Page / Stories using official Meta Graph API.
-        Uses multipart POST with raw file bytes: no browser, no public URL required!
+        Directly uploads image/video to Facebook Page Stories (with fallback to Page Feed)
+        using official Meta Graph API.
+        Uses multipart POST with raw file bytes: zero browser overhead!
         """
         if not media_path.exists():
             return {"status": "FAILED", "platform": "facebook", "reason": "Media file missing"}
 
-        token = self.creds.get("meta_access_token")
+        self.creds = self.auth.get_meta_credentials()
+        token = self.creds.get("fb_page_token") or self.creds.get("meta_access_token")
         page_id = self.creds.get("fb_page_id")
 
         if not token or not page_id:
@@ -204,29 +207,66 @@ class DirectSocialApiUploader:
 
         try:
             if is_video:
+                # Step 1: Upload video with published=false for story creation
                 url = f"https://graph.facebook.com/v21.0/{page_id}/videos"
                 with open(media_path, "rb") as f:
                     files = {"source": f}
+                    data = {"published": "false", "access_token": token}
+                    res = requests.post(url, data=data, files=files, timeout=90)
+                
+                if res.status_code == 200:
+                    vid_id = res.json().get("id")
+                    # Step 2: Publish as Facebook Video Story
+                    story_url = f"https://graph.facebook.com/v21.0/{page_id}/video_stories"
+                    s_res = requests.post(story_url, data={"video_id": vid_id, "access_token": token}, timeout=30)
+                    if s_res.status_code in [200, 201]:
+                        s_id = s_res.json().get("post_id") or vid_id
+                        logger.info(f"🎉 [Facebook API] Video Story published successfully! ID: {s_id}")
+                        return {"status": "PUBLISHED", "platform": "facebook", "mode": "GRAPH_API_STORY", "id": s_id}
+                    else:
+                        logger.debug(f"Video story endpoint notice ({s_res.text}), falling back to direct page video...")
+
+                # Fallback: Publish directly to Page Feed/Reels
+                with open(media_path, "rb") as f:
+                    files = {"source": f}
                     data = {"description": caption, "access_token": token}
-                    res = requests.post(url, data=data, files=files, timeout=60)
+                    res = requests.post(url, data=data, files=files, timeout=90)
                     if res.status_code == 200:
                         vid_id = res.json().get("id")
-                        logger.info(f"🎉 [Facebook API] Video published successfully! ID: {vid_id}")
+                        logger.info(f"🎉 [Facebook API] Video published to Page successfully! ID: {vid_id}")
                         return {"status": "PUBLISHED", "platform": "facebook", "mode": "GRAPH_API", "id": vid_id}
-                    else:
-                        return {"status": "FAILED", "platform": "facebook", "reason": res.text}
+                    return {"status": "FAILED", "platform": "facebook", "reason": res.text}
+
             else:
+                # Step 1: Upload photo with published=false for story creation
                 url = f"https://graph.facebook.com/v21.0/{page_id}/photos"
+                with open(media_path, "rb") as f:
+                    files = {"source": f}
+                    data = {"published": "false", "access_token": token}
+                    res = requests.post(url, data=data, files=files, timeout=45)
+
+                if res.status_code == 200:
+                    photo_id = res.json().get("id")
+                    # Step 2: Publish as Facebook Photo Story
+                    story_url = f"https://graph.facebook.com/v21.0/{page_id}/photo_stories"
+                    s_res = requests.post(story_url, data={"photo_id": photo_id, "access_token": token}, timeout=30)
+                    if s_res.status_code in [200, 201]:
+                        s_id = s_res.json().get("post_id") or photo_id
+                        logger.info(f"🎉 [Facebook API] Photo Story published successfully! ID: {s_id}")
+                        return {"status": "PUBLISHED", "platform": "facebook", "mode": "GRAPH_API_STORY", "id": s_id}
+                    else:
+                        logger.debug(f"Photo story endpoint notice ({s_res.text}), falling back to direct page photo...")
+
+                # Fallback: Publish directly to Page Feed
                 with open(media_path, "rb") as f:
                     files = {"source": f}
                     data = {"caption": caption, "access_token": token}
                     res = requests.post(url, data=data, files=files, timeout=45)
                     if res.status_code == 200:
                         photo_id = res.json().get("id")
-                        logger.info(f"🎉 [Facebook API] Photo published successfully! ID: {photo_id}")
+                        logger.info(f"🎉 [Facebook API] Photo published to Page successfully! ID: {photo_id}")
                         return {"status": "PUBLISHED", "platform": "facebook", "mode": "GRAPH_API", "id": photo_id}
-                    else:
-                        return {"status": "FAILED", "platform": "facebook", "reason": res.text}
+                    return {"status": "FAILED", "platform": "facebook", "reason": res.text}
         except Exception as e:
             logger.warning(f"Facebook Graph API error: {e}")
             return {"status": "FAILED", "platform": "facebook", "reason": str(e)}
@@ -242,6 +282,7 @@ class DirectSocialApiUploader:
         if not media_path.exists():
             return {"status": "FAILED", "platform": "whatsapp", "reason": "Media file missing"}
 
+        self.creds = self.auth.get_meta_credentials()
         token = self.creds.get("wa_token")
         phone_id = self.creds.get("wa_phone_id")
         target_phone = self.creds.get("wa_target_phone") or os.getenv("WHATSAPP_TARGET_PHONE")

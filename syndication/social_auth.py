@@ -164,12 +164,48 @@ class SocialAuth:
         self.save()
 
     def get_meta_credentials(self) -> Dict[str, str]:
-        """Returns remembered Meta tokens."""
+        """Returns remembered Meta tokens, prioritizing fresh environment variables."""
+        fb_token = (
+            os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+            or os.getenv("FB_PAGE_ACCESS_TOKEN")
+            or os.getenv("META_ACCESS_TOKEN")
+            or self.data.get("facebook", {}).get("page_access_token", "")
+            or self.data.get("instagram", {}).get("access_token", "")
+        )
+        fb_page_id = (
+            os.getenv("FACEBOOK_PAGE_ID")
+            or os.getenv("FB_PAGE_ID")
+            or self.data.get("facebook", {}).get("page_id", "")
+        )
+        ig_token = (
+            os.getenv("INSTAGRAM_ACCESS_TOKEN")
+            or os.getenv("META_ACCESS_TOKEN")
+            or self.data.get("instagram", {}).get("access_token", "")
+            or fb_token
+        )
+        ig_account_id = (
+            os.getenv("INSTAGRAM_ACCOUNT_ID")
+            or self.data.get("instagram", {}).get("account_id", "")
+        )
+        wa_token = (
+            os.getenv("WHATSAPP_TOKEN")
+            or self.data.get("whatsapp", {}).get("token", "")
+        )
+        wa_phone_id = (
+            os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+            or self.data.get("whatsapp", {}).get("phone_number_id", "")
+        )
+        wa_target_phone = (
+            os.getenv("WHATSAPP_TARGET_PHONE")
+            or self.data.get("whatsapp", {}).get("target_phone", "")
+        )
         return {
-            "meta_access_token": self.data["instagram"].get("access_token") or self.data["facebook"].get("page_access_token", ""),
-            "ig_account_id": self.data["instagram"].get("account_id", ""),
-            "fb_page_id": self.data["facebook"].get("page_id", ""),
-            "wa_token": self.data["whatsapp"].get("token", ""),
-            "wa_phone_id": self.data["whatsapp"].get("phone_number_id", ""),
-            "wa_target_phone": self.data["whatsapp"].get("target_phone", ""),
+            "meta_access_token": fb_token,
+            "fb_page_token": fb_token,
+            "fb_page_id": fb_page_id,
+            "ig_token": ig_token,
+            "ig_account_id": ig_account_id,
+            "wa_token": wa_token,
+            "wa_phone_id": wa_phone_id,
+            "wa_target_phone": wa_target_phone,
         }
