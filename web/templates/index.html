@@ -229,6 +229,17 @@
                             <span class="text-xs text-slate-500 group-hover:text-slate-300">Sync →</span>
                         </button>
 
+                        <button onclick="triggerSocialNow()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-pink-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">📲</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-pink-400">Publish Staged Stories Now</div>
+                                    <div class="text-[10px] text-slate-400">Uploads Story/Post/ to IG, FB & WA Stories</div>
+                                </div>
+                            </div>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-300">Publish →</span>
+                        </button>
+
                         <button onclick="triggerSocialPending()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-blue-500/50 flex items-center justify-between group transition">
                             <div class="flex items-center gap-3">
                                 <span class="text-xl">🔄</span>
@@ -260,6 +271,17 @@
                                 </div>
                             </div>
                             <span class="text-xs text-slate-500 group-hover:text-slate-300" id="cleaner-badge">Clean →</span>
+                        </button>
+
+                        <button onclick="triggerSyncGitHub()" class="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/50 flex items-center justify-between group transition">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">🌐</span>
+                                <div class="text-left">
+                                    <div class="text-xs font-bold text-white group-hover:text-cyan-400">Sync Codebase with GitHub</div>
+                                    <div class="text-[10px] text-slate-400">Autonomous commit & push to origin/main</div>
+                                </div>
+                            </div>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-300">Sync →</span>
                         </button>
                     </div>
                 </div>
@@ -680,6 +702,32 @@
                 setTimeout(refreshData, 3000);
             } catch (e) {
                 showToast('Failed to trigger 1-Click Cleaner', '❌');
+            }
+        }
+
+        async function triggerSocialNow() {
+            showToast('Publishing staged stories across Instagram, Facebook & WhatsApp...', '⏳');
+            try {
+                const res = await apiFetch('/api/trigger/social_now', 'POST');
+                showToast(res.message || 'Social story publishing started in background!', '📲');
+                setTimeout(refreshData, 2500);
+            } catch (e) {
+                showToast('Failed to trigger social publishing', '❌');
+            }
+        }
+
+        async function triggerSyncGitHub() {
+            showToast('Synchronizing codebase with GitHub...', '⏳');
+            try {
+                const res = await apiFetch('/api/trigger/sync_github', 'POST');
+                if (res.status === 'OK') {
+                    showToast('Codebase synchronized & pushed to GitHub!', '🌐');
+                } else {
+                    showToast(res.message || 'GitHub sync completed', 'ℹ️');
+                }
+                setTimeout(refreshData, 2000);
+            } catch (e) {
+                showToast('GitHub sync request failed', '❌');
             }
         }
 

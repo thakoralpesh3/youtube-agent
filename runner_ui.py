@@ -157,6 +157,7 @@ def interactive_menu() -> tuple[str, Optional[str], Optional[str], bool, str]:
         console.print("  [bold cyan][S][/bold cyan] 🛡️  [bold white]Cybersecurity Sentinel & Anti-Hacker Shield[/bold white] (Audit & Harden)")
         console.print("  [bold cyan][E][/bold cyan] 💡 [bold white]AI Creative Evolution & Surprise Ideas[/bold white] (Brainstorm Breakthroughs)")
         console.print("  [bold cyan][R][/bold cyan] 🔄 [bold yellow]Retry Stored Social Stories[/bold yellow] (Auto-Retry Pending IG, FB & WA Stories)")
+        console.print("  [bold cyan][P][/bold cyan] 📲 [bold yellow]Publish Staged Stories Now[/bold yellow] (Upload Story/Post/ to IG, FB & WA Stories)")
         console.print("  [bold cyan][C][/bold cyan] ☁️  [bold yellow]Trigger Cloud Run on GitHub[/bold yellow] (Zero-delay GitHub Actions Cloud Dispatch)")
         console.print("  [bold cyan][G][/bold cyan] 🌐 [bold yellow]Sync Codebase to GitHub[/bold yellow] (Auto-Commit & Push All Antigravity Updates)")
         console.print("  [bold cyan][0][/bold cyan] 🚪 [bold dim]Exit[/bold dim]\n")
@@ -176,6 +177,8 @@ def interactive_menu() -> tuple[str, Optional[str], Optional[str], bool, str]:
             return "evolution", None, None, False, "all"
         if choice.strip().upper() == "R":
             return "retry_social", None, None, False, "social"
+        if choice.strip().upper() == "P":
+            return "publish_stories", None, None, False, "social"
         if choice.strip().upper() == "C":
             return "cloud_dispatch", None, None, False, "all"
         if choice.strip().upper() == "G":
@@ -649,6 +652,22 @@ def run_pipeline():
                 return
             elif action == "retry_social":
                 handle_social_retry()
+                return
+            elif action == "publish_stories":
+                from syndication.story_watcher import StoryWatcher
+                console.clear()
+                console.print(
+                    Panel.fit(
+                        "[bold yellow]📲 UPLOAD STORIES FROM POST FOLDER[/bold yellow]\n"
+                        "[dim]Uploads media from Story/Post/ directly to Instagram, Facebook & WhatsApp without deleting originals.[/dim]",
+                        border_style="yellow",
+                    )
+                )
+                watcher = StoryWatcher()
+                with console.status("[bold green]Uploading stories across social platforms..."):
+                    res = watcher.upload_from_post_folder(force=True)
+                console.print(f"\n[bold green]✅ Processed {len(res)} story item(s)![/bold green]")
+                Prompt.ask("\nPress Enter to return")
                 return
             elif action == "sync_github":
                 from core.github_sync import sync_to_github, get_remote_info

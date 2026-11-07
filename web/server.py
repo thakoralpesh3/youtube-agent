@@ -71,12 +71,27 @@ async def status_handler(request: web.Request) -> web.Response:
         "token_file": str(yt_token),
     }
 
-    # 2. Social Profiles status
+    # 2. Social Profiles & API status
     social_profile = config.BASE_DIR / "assets" / "browser_profiles" / "social_firefox"
     social_ready = (social_profile / "cookies.sqlite").exists()
+    from syndication.social_auth import SocialAuth
+    sa = SocialAuth()
+    mcreds = sa.get_meta_credentials()
     social_status = {
         "browser_session_ready": social_ready,
         "profile_dir": str(social_profile),
+        "instagram": {
+            "ready": sa.is_instagram_ready(),
+            "mode": "API Direct Protocol" if (mcreds.get("ig_token") or sa.data.get("instagram", {}).get("sessionid")) else ("Browser" if social_ready else "Login Needed"),
+        },
+        "facebook": {
+            "ready": sa.is_facebook_ready(),
+            "mode": "Graph API Direct" if (mcreds.get("fb_page_token") and mcreds.get("fb_page_id")) else ("Browser Session" if social_ready else "Login Needed"),
+        },
+        "whatsapp": {
+            "ready": sa.is_whatsapp_ready(),
+            "mode": "Cloud API" if mcreds.get("wa_token") else ("WhatsApp Web" if social_ready else "Pairing Needed"),
+        },
     }
 
     # 3. Security Status
@@ -249,6 +264,34 @@ async def trigger_cleaner_handler(request: web.Request) -> web.Response:
     return web.json_response({"status": "OK", "message": "1-Click YouTube Stuck Cleaner initiated in background!"})
 
 
+async def trigger_social_now_handler(request: web.Request) -> web.Response:
+    if not check_auth(request):
+        return web.json_response({"status": "UNAUTHORIZED"}, status=401)
+
+    def _run():
+        try:
+            from scheduler import run_daily_social_worker
+            run_daily_social_worker(force=True)
+        except Exception as e:
+            logger.error(f"Error in on-demand social worker: {e}", exc_info=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return web.json_response({"status": "OK", "message": "Social story publishing (IG, FB & WA Stories) launched in background!"})
+
+
+async def trigger_sync_github_handler(request: web.Request) -> web.Response:
+    if not check_auth(request):
+        return web.json_response({"status": "UNAUTHORIZED"}, status=401)
+
+    try:
+        from core.github_sync import sync_to_github
+        res = sync_to_github(push=True)
+        return web.json_response({"status": "OK", "result": res})
+    except Exception as e:
+        logger.error(f"Error in GitHub sync: {e}", exc_info=True)
+        return web.json_response({"status": "ERROR", "message": str(e)}, status=500)
+
+
 
 async def upload_story_handler(request: web.Request) -> web.Response:
     """
@@ -294,6 +337,22 @@ async def upload_story_handler(request: web.Request) -> web.Response:
             caption_file.write_text(caption_text, encoding="utf-8")
 
         logger.info(f"📲 [Web Studio] Hot-Drop file saved: {saved_filename} (Caption: '{caption_text}')")
+
+        # Trigger immediate background story publishing for hot-drop uploads
+        try:
+            from syndication.story_watcher import StoryWatcher
+            watcher = StoryWatcher()
+            threading.Thread(
+                target=watcher.process_file,
+                args=(target_path,),
+                kwargs={"custom_caption": caption_text or None, "force": True},
+                daemon=True,
+                name="HotDropStoryWorker"
+            ).start()
+            logger.info(f"🚀 [Web Studio] Launched immediate background story upload for: {saved_filename}")
+        except Exception as we:
+            logger.debug(f"Immediate hot-drop worker notice: {we}")
+
         return web.json_response({
             "status": "OK",
             "filename": saved_filename,
@@ -365,6 +424,8 @@ def create_app() -> web.Application:
     app.router.add_post("/api/social/retry_pending", trigger_social_retry_handler)
     app.router.add_post("/api/trigger/security", trigger_security_handler)
     app.router.add_post("/api/trigger/cleaner", trigger_cleaner_handler)
+    app.router.add_post("/api/trigger/social_now", trigger_social_now_handler)
+    app.router.add_post("/api/trigger/sync_github", trigger_sync_github_handler)
     app.router.add_post("/api/upload/story", upload_story_handler)
     app.router.add_get("/api/evolution/sparks", get_sparks_handler)
     app.router.add_post("/api/evolution/surprise", surprise_sparks_handler)
