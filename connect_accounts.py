@@ -35,7 +35,7 @@ def check_gemini() -> bool:
         return False
     try:
         from google import genai
-        from growth.model_resolver import get_candidate_models
+        from growth.model_resolver import get_candidate_models, mark_model_successful
         client = genai.Client(api_key=api_key)
         candidates = get_candidate_models(preferred=getattr(config, "GEMINI_MODEL", "gemini-3.6-flash"))
         for model in candidates:
@@ -45,6 +45,7 @@ def check_gemini() -> bool:
                     contents="ping",
                 )
                 if res and res.text:
+                    mark_model_successful(model)
                     console.print(f"✅ [bold green]Google Gemini AI:[/bold green] Connected & Operational (Model: [bold cyan]{model}[/bold cyan])")
                     return True
             except Exception:
