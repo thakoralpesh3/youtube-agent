@@ -343,8 +343,18 @@ def get_candidate_models(
     except Exception:
         candidates = list(DEFAULT_TIER_FALLBACKS.get(tier_key, DEFAULT_FALLBACK_CANDIDATES))
 
+    # Fast-path: If a verified working model was recently cached (within 3 hours),
+    # prioritize it unless user explicitly chose a different model
+    cached_working = None
+    try:
+        cdata = _resolver._read_cache() or {}
+        if cdata.get("last_working_model") and (time.time() - cdata.get("last_working_ts", 0)) < 10800:
+            cached_working = cdata["last_working_model"]
+    except Exception:
+        pass
+
     user_override = get_runtime_model()
-    chosen_pref = user_override or preferred
+    chosen_pref = user_override or preferred or cached_working
 
     if chosen_pref:
         clean_pref = chosen_pref.replace("models/", "").strip()
@@ -353,6 +363,20 @@ def get_candidate_models(
         candidates.insert(0, clean_pref)
 
     return list(dict.fromkeys(candidates))
+
+
+def mark_model_successful(model_name: str) -> None:
+    """Promotes a verified working model into the cache to avoid 429 delays on future calls."""
+    try:
+        clean_name = model_name.replace("models/", "").strip()
+        cdata = _resolver._read_cache() or {}
+        cdata["last_working_model"] = clean_name
+        cdata["last_working_ts"] = time.time()
+        _resolver.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_resolver.cache_path, "w", encoding="utf-8") as f:
+            json.dump(cdata, f, indent=2)
+    except Exception:
+        pass
 
 
 def call_gemini_resilient(
@@ -380,6 +404,7 @@ def call_gemini_resilient(
 
             response = client.models.generate_content(**kwargs)
             logger.info(f"✨ [{task_name}] Successfully completed using {model}")
+            mark_model_successful(model)
             return response, model
 
         except Exception as err:
