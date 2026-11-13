@@ -15,8 +15,13 @@ import sys
 import time
 from pathlib import Path
 
-# Add project root to sys.path
+# Auto-switch to virtual environment if running with system Python
 REPO_ROOT = Path(__file__).resolve().parent
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python3"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON.resolve()):
+    os.execv(str(VENV_PYTHON.resolve()), [str(VENV_PYTHON.resolve())] + sys.argv)
+
+# Add project root to sys.path
 sys.path.insert(0, str(REPO_ROOT))
 
 from rich.console import Console

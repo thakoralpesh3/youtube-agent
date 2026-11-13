@@ -7,14 +7,21 @@ Deep scans all run directories (single and trilingual), handles interrupted runs
 and maintains an upload cache to eliminate duplicate uploads.
 """
 
+import os
+import sys
+from pathlib import Path
+
+# Auto-switch to virtual environment if running with system Python
+REPO_ROOT = Path(__file__).resolve().parent
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python3"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON.resolve()):
+    os.execv(str(VENV_PYTHON.resolve()), [str(VENV_PYTHON.resolve())] + sys.argv)
+
 import hashlib
 import json
 import logging
-import os
-import sys
 import time
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import config
