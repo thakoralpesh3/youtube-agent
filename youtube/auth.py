@@ -273,44 +273,87 @@ class YouTubeAuth:
                     str(self.client_secret_file), SCOPES
                 )
 
+                cb_server = _OAuthCallbackServer()
+                server_started = cb_server.start()
+                port = cb_server.port if server_started else 8088
+
+                flow.redirect_uri = f"http://localhost:{port}/"
+                auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+
                 print("\n" + "=" * 70)
                 print("🔑 GOOGLE OAUTH 2.0 YOUTUBE AUTHORIZATION")
                 print("=" * 70)
-                print("👉 A browser window should open. If it does not open automatically,")
-                print("   copy and paste the authorization link below into your browser.")
+                print("👉 Step 1: Open this authorization link in your browser:")
+                print(f"\n   \033[1;36m{auth_url}\033[0m\n")
+                print("👉 Step 2: Sign in with your YouTube account ('IT'S GROWN UP TIME').")
                 print("\nℹ️  If Google shows 'Google hasn't verified this app':")
                 print("   1. Click 'Advanced' (bottom left)")
                 print("   2. Click 'Go to YouTube Agent (unsafe)'")
                 print("   3. Click 'Continue' to approve access.")
-                print("=" * 70 + "\n")
+                print("\n👉 Step 3: Approval completion:")
+                print(f"   • If your browser redirects to http://localhost:{port}/, it will complete automatically.")
+                print("   • If your browser says 'Site can't be reached' (e.g. Brave Shields), copy the redirected")
+                print("     URL from your browser address bar and paste it below.")
+                print("=" * 70)
 
-                # Try high non-conflicting port 8088, fallback to ephemeral port 0
-                creds = None
-                for target_port in [8088, 8090, 0]:
+                # Attempt to open default browser
+                try:
+                    import webbrowser
+                    webbrowser.open(auth_url)
+                except Exception:
+                    pass
+
+                print(f"\n⏳ Listening on http://localhost:{port}/ (or paste redirected URL / code below):")
+                user_pasted_response = None
+
+                while not cb_server.done_event.is_set():
                     try:
-                        creds = flow.run_local_server(
-                            port=target_port,
-                            prompt="consent",
-                            access_type="offline",
-                            open_browser=True,
-                        )
-                        if creds:
-                            break
-                    except OSError as port_err:
-                        # Only retry if the local port itself is already occupied
-                        if getattr(port_err, "errno", None) in (98, 48):
-                            logger.debug(f"Port {target_port} occupied, trying next port...")
-                            continue
-                        raise
-                    except Exception as auth_err:
-                        err_msg = str(auth_err).lower()
-                        if "access_denied" in err_msg:
-                            raise RuntimeError(
-                                "Google returned 'Error 403: access_denied'. "
-                                "Your Google email must be added to 'Test users' in Google Cloud Console "
-                                "(APIs & Services > OAuth consent screen), or click 'PUBLISH APP' to switch to production."
-                            ) from auth_err
-                        raise
+                        rlist, _, _ = select.select([sys.stdin], [], [], 0.5)
+                        if rlist:
+                            line = sys.stdin.readline().strip()
+                            if line:
+                                user_pasted_response = line
+                                break
+                    except Exception:
+                        cb_server.done_event.wait(timeout=1.0)
+
+                cb_server.stop()
+
+                # Process authorization response
+                auth_resp = cb_server.auth_response or user_pasted_response
+                if not auth_resp:
+                    raise RuntimeError("OAuth authorization was not completed or was cancelled.")
+
+                # Check if access was denied by Google or user
+                if "error=access_denied" in str(auth_resp).lower():
+                    raise RuntimeError(
+                        "\n" + "=" * 70 + "\n"
+                        "❌ GOOGLE ACCESS DENIED (Error 403: access_denied)\n"
+                        "=" * 70 + "\n"
+                        "Google blocked login because project 'gen-lang-client-0857743618' is in 'Testing' mode.\n\n"
+                        "👉 QUICK FIX (Takes 1 minute):\n"
+                        "1. Open https://console.cloud.google.com/apis/credentials/consent\n"
+                        "2. Select project 'gen-lang-client-0857743618'\n"
+                        "3. Under 'Test users', click '+ ADD USERS' and add your Gmail account.\n"
+                        "   (Or click 'PUBLISH APP' to switch to Production so anyone can log in)\n"
+                        "4. Click SAVE and re-run: python3 connect_accounts.py --login-youtube\n"
+                        "=" * 70
+                    )
+
+                creds = None
+                try:
+                    if auth_resp.startswith("http"):
+                        flow.fetch_token(authorization_response=auth_resp)
+                    else:
+                        flow.fetch_token(code=auth_resp.strip())
+                    creds = flow.credentials
+                except Exception as exchange_err:
+                    err_s = str(exchange_err).lower()
+                    if "access_denied" in err_s:
+                        raise RuntimeError(
+                            "Google returned 'access_denied'. Please add your email to 'Test users' in Google Cloud Console."
+                        ) from exchange_err
+                    raise RuntimeError(f"Failed to exchange token with Google: {exchange_err}") from exchange_err
 
                 if not creds:
                     raise RuntimeError("Could not complete Google OAuth login.")
