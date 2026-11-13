@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 
 # Auto-switch to virtual environment if running with system Python
-REPO_ROOT = Path(__file__).resolve().parent
-VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python3"
-if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON.resolve()):
-    os.execv(str(VENV_PYTHON.resolve()), [str(VENV_PYTHON.resolve())] + sys.argv)
+if sys.prefix == sys.base_prefix:
+    _venv_py = Path(__file__).resolve().parent / ".venv" / "bin" / "python3"
+    if _venv_py.exists():
+        os.execv(str(_venv_py), [str(_venv_py)] + sys.argv)
 
 import hashlib
 import json
