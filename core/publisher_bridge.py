@@ -27,6 +27,18 @@ def is_publisher_ready_to_run(force: bool = False) -> bool:
     if force:
         return True
 
+    # Check if there are pending uploads waiting to be dispatched
+    pending_file = PUBLISHER_AGENT_DIR / "data" / "pending_uploads.json"
+    if pending_file.exists():
+        try:
+            pdata = json.loads(pending_file.read_text(encoding="utf-8") or "{}")
+            pending_items = [i for i in pdata.get("queue", []) if i.get("status") == "pending"]
+            if pending_items:
+                logger.info(f"📦 Found {len(pending_items)} pending upload(s) in PublisheR AI queue. Run is ready!")
+                return True
+        except Exception:
+            pass
+
     if PUBLISHER_TRACKER.exists():
         try:
             import datetime
