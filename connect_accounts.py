@@ -80,12 +80,26 @@ def check_youtube() -> bool:
             uploader = YouTubeUploader(auth=auth)
             ch = uploader.service.channels().list(part="snippet,statistics", mine=True).execute()
 
-        item = ch["items"][0]
+        items = ch.get("items", [])
+        if not items:
+            console.print("❌ [bold red]YouTube Channel:[/bold red] Logged in successfully, but no YouTube Channel was found on this Google account.")
+            console.print("👉 Please make sure you are selecting the Google account with channel 'IT'S GROWN UP TIME'.")
+            return False
+
+        item = items[0]
         title = item["snippet"]["title"]
         chid = item["id"]
         subs = item["statistics"].get("subscriberCount", 0)
         vids = item["statistics"].get("videoCount", 0)
         console.print(f"✅ [bold green]YouTube Channel:[/bold green] Connected as [bold cyan]{title}[/bold cyan] (ID: {chid}, Videos: {vids}, Subs: {subs})")
+
+        # Sync fresh token to GitHub Actions Secrets
+        try:
+            from core.github_sync import sync_secrets_to_github
+            sync_secrets_to_github()
+        except Exception:
+            pass
+
         return True
     except Exception as e:
         console.print(f"❌ [bold red]YouTube Channel:[/bold red] Error: {e}")
