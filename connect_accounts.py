@@ -270,9 +270,15 @@ def main():
             upload_waiting_content()
             resume_incomplete_youtube_runs()
             manual_run_youtube_prompt()
-        console.print("\n" + "=" * 65)
-        console.print("🎯 [bold green]YOUTUBE 1-CLICK OPERATION COMPLETE![/bold green]")
-        console.print("=" * 65 + "\n")
+            console.print("\n" + "=" * 65)
+            console.print("🎯 [bold green]YOUTUBE 1-CLICK OPERATION COMPLETE![/bold green]")
+            console.print("=" * 65 + "\n")
+        else:
+            console.print("\n" + "=" * 65)
+            console.print("⚠️ [bold yellow]YOUTUBE LOGIN WAS NOT COMPLETED OR WAS CANCELLED[/bold yellow]")
+            console.print("👉 Please run 'python3 connect_accounts.py --login-youtube' in your terminal,")
+            console.print("   open the authorization link in your browser, and approve access.")
+            console.print("=" * 65 + "\n")
         return
 
     if "--login-browser" in sys.argv:

@@ -220,23 +220,36 @@ class YouTubeAuth:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self.client_secret_file), SCOPES
                 )
-                
-                # Use offline access and prompt=consent to ensure a permanent refresh_token
-                try:
-                    creds = flow.run_local_server(
-                        port=8080,
-                        prompt="consent",
-                        access_type="offline",
-                        open_browser=True,
-                    )
-                except Exception:
-                    # Fallback to random dynamic port if 8080 is in use
-                    creds = flow.run_local_server(
-                        port=0,
-                        prompt="consent",
-                        access_type="offline",
-                        open_browser=True,
-                    )
+
+                print("\n" + "=" * 70)
+                print("🔑 GOOGLE OAUTH 2.0 YOUTUBE AUTHORIZATION")
+                print("=" * 70)
+                print("👉 A browser window should open. If it does not open automatically,")
+                print("   copy and paste the authorization link below into your browser.")
+                print("\nℹ️  If Google shows 'Google hasn't verified this app':")
+                print("   1. Click 'Advanced' (bottom left)")
+                print("   2. Click 'Go to YouTube Agent (unsafe)'")
+                print("   3. Click 'Continue' to approve access.")
+                print("=" * 70 + "\n")
+
+                # Try high non-conflicting port 8088, fallback to ephemeral port 0
+                creds = None
+                for target_port in [8088, 8090, 0]:
+                    try:
+                        creds = flow.run_local_server(
+                            port=target_port,
+                            prompt="consent",
+                            access_type="offline",
+                            open_browser=True,
+                        )
+                        if creds:
+                            break
+                    except Exception as port_err:
+                        logger.debug(f"Port {target_port} unavailable ({port_err}), trying next port...")
+                        continue
+
+                if not creds:
+                    raise RuntimeError("Could not bind a local server port for OAuth callback.")
 
             # Save credentials for future unattended runs
             self.token_file.parent.mkdir(parents=True, exist_ok=True)
