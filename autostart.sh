@@ -8,16 +8,18 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python3"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
+
 # Ensure only one instance of the autostart daemon runs at any time
 LOCK_FILE="/tmp/youtube_agent_autostart.lock"
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo "ℹ️ YouTube Agent background daemon is already running."
     # When the user logs in to desktop, display the status banner so notifications are always visible!
-    if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
-        source "$SCRIPT_DIR/.venv/bin/activate"
-    fi
-    python3 -c "
+    "$PYTHON_BIN" -c "
 try:
     from growth.notifier import notifier
     notifier.send_desktop_login_banner()
@@ -60,7 +62,7 @@ if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
 fi
 
 # Dispatch accurate startup desktop banner via resilient notifier
-python3 -c "
+"$PYTHON_BIN" -c "
 try:
     from growth.notifier import notifier
     notifier.send_desktop_login_banner()
@@ -71,11 +73,11 @@ except Exception:
 
 # Enforce Cybersecurity Vault Hardening & Integrity Audit on Startup
 echo "🛡️ [$(date '+%Y-%m-%d %H:%M:%S')] Enforcing Cybersecurity Vault Hardening & File Permissions..." >> "$LOG_FILE"
-python3 -c "from security.security_guard import SecurityGuard; SecurityGuard().run_security_audit(auto_harden=True, alert_on_threat=True)" >> "$LOG_FILE" 2>&1 || true
+"$PYTHON_BIN" -c "from security.security_guard import SecurityGuard; SecurityGuard().run_security_audit(auto_harden=True, alert_on_threat=True)" >> "$LOG_FILE" 2>&1 || true
 
 # Start master autonomous scheduler daemon
 # scheduler.py automatically checks and runs both YouTube & Social agents in the background
 # strictly 1 time per day on laptop startup (with persistent daily limiters).
 echo "🤖 [$(date '+%Y-%m-%d %H:%M:%S')] Starting master background automation daemon (YouTube & Social AI)..." >> "$LOG_FILE"
-exec python3 "$SCRIPT_DIR/scheduler.py" >> "$LOG_FILE" 2>&1
+exec "$PYTHON_BIN" "$SCRIPT_DIR/scheduler.py" >> "$LOG_FILE" 2>&1
 
