@@ -58,7 +58,13 @@ def main():
         # Accessing service triggers fresh login flow if expired
         ch = uploader.service.channels().list(part="snippet,statistics", mine=True).execute()
 
-        item = ch["items"][0]
+        items = ch.get("items", [])
+        if not items:
+            console.print("❌ [bold red]YouTube Channel:[/bold red] Logged in successfully, but no YouTube Channel was found on this Google account.")
+            console.print("👉 Please make sure you are selecting the Google account with channel 'IT'S GROWN UP TIME'.")
+            sys.exit(1)
+
+        item = items[0]
         title = item["snippet"]["title"]
         chid = item["id"]
         subs = item["statistics"].get("subscriberCount", 0)
