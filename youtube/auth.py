@@ -1,11 +1,15 @@
 import json
 import logging
 import os
+import select
 import socket
 import sys
+import threading
 import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse, parse_qs
 
 # Force IPv4 preference for Google OAuth endpoints to prevent SSLEOFError/Errno 93
 try:
