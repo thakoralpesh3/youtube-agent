@@ -60,6 +60,54 @@ def _get_auth_request(timeout: int = 10) -> Request:
     return Request(session=session)
 
 
+class _OAuthCallbackServer:
+    def __init__(self, ports=(8088, 8090, 8085)):
+        self.ports = ports
+        self.port: Optional[int] = None
+        self.auth_response: Optional[str] = None
+        self.server: Optional[HTTPServer] = None
+        self._thread: Optional[threading.Thread] = None
+        self.done_event = threading.Event()
+
+    def start(self) -> bool:
+        callback_self = self
+        class _Handler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                pass
+            def do_GET(self):
+                callback_self.auth_response = f"http://localhost:{callback_self.port}" + self.path
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(
+                    b"<html><head><title>Authentication Successful</title></head>"
+                    b"<body style='font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:50px;background:#0f172a;color:#f8fafc;'>"
+                    b"<h1 style='color:#10b981;font-size:28px;'>&#x2705; YouTube Login Successful!</h1>"
+                    b"<p style='font-size:16px;color:#94a3b8;'>Credentials received. You can now close this tab and return to your terminal.</p>"
+                    b"</body></html>"
+                )
+                callback_self.done_event.set()
+
+        for p in self.ports:
+            try:
+                self.server = HTTPServer(("localhost", p), _Handler)
+                self.port = p
+                self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+                self._thread.start()
+                return True
+            except OSError:
+                continue
+        return False
+
+    def stop(self):
+        if self.server:
+            try:
+                self.server.shutdown()
+                self.server.server_close()
+            except Exception:
+                pass
+
+
 class YouTubeAuth:
     def __init__(
         self,
