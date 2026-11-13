@@ -244,12 +244,24 @@ class YouTubeAuth:
                         )
                         if creds:
                             break
-                    except Exception as port_err:
-                        logger.debug(f"Port {target_port} unavailable ({port_err}), trying next port...")
-                        continue
+                    except OSError as port_err:
+                        # Only retry if the local port itself is already occupied
+                        if getattr(port_err, "errno", None) in (98, 48):
+                            logger.debug(f"Port {target_port} occupied, trying next port...")
+                            continue
+                        raise
+                    except Exception as auth_err:
+                        err_msg = str(auth_err).lower()
+                        if "access_denied" in err_msg:
+                            raise RuntimeError(
+                                "Google returned 'Error 403: access_denied'. "
+                                "Your Google email must be added to 'Test users' in Google Cloud Console "
+                                "(APIs & Services > OAuth consent screen), or click 'PUBLISH APP' to switch to production."
+                            ) from auth_err
+                        raise
 
                 if not creds:
-                    raise RuntimeError("Could not bind a local server port for OAuth callback.")
+                    raise RuntimeError("Could not complete Google OAuth login.")
 
             # Save credentials for future unattended runs
             self.token_file.parent.mkdir(parents=True, exist_ok=True)
