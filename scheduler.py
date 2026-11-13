@@ -612,17 +612,20 @@ def run_daily_scheduler():
     schedule.every().day.at(cleaner_time).do(run_daily_youtube_cleaner)
     logger.info(f"🧹 [Daily Cleaner] Scheduled daily at {cleaner_time} IST (1-Click Stuck Video Cleaner & Channel Auditor)")
 
-    # Schedule recurring sequential coordinator every 8 hours (Strict order: [1] YouTube Agent ➔ [2] Social Agent)
-    autorun_interval = getattr(config, "AUTORUN_INTERVAL_HOURS", 8)
-    schedule.every(autorun_interval).hours.do(
-        lambda: threading.Thread(
-            target=run_daily_coordinator_worker,
-            kwargs={"force": True},
-            daemon=True,
-            name="8HourSequentialCoordinator",
-        ).start()
-    )
-    logger.info(f"⏱️ [8-Hour Auto-Run] Scheduled sequential coordinator every {autorun_interval} hours (Strict Order: [1] YouTube Agent ➔ [2] Social Agent)")
+    # Schedule recurring sequential coordinator if interval is configured (> 0)
+    autorun_interval = getattr(config, "AUTORUN_INTERVAL_HOURS", 0)
+    if autorun_interval and autorun_interval > 0:
+        schedule.every(autorun_interval).hours.do(
+            lambda: threading.Thread(
+                target=run_daily_coordinator_worker,
+                kwargs={"force": True},
+                daemon=True,
+                name="SequentialCoordinatorInterval",
+            ).start()
+        )
+        logger.info(f"⏱️ [Auto-Run Interval] Scheduled sequential coordinator every {autorun_interval} hours (Strict Order: [1] YouTube Agent ➔ [2] Social Agent)")
+    else:
+        logger.info("⏹️ [Auto-Run Interval] Recurring interval timer is DISABLED (0 hours). Agent operates strictly on system startup trigger.")
 
     # Schedule hourly self-run (checks pending uploads & system health every 1 hour)
     schedule.every(1).hours.do(hourly_cycle)

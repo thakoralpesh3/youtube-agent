@@ -61,8 +61,8 @@ DAILY_UPLOAD_TIME = os.getenv("DAILY_UPLOAD_TIME", "23:30")  # HH:MM format for 
 SOCIAL_DAILY_UPLOAD_TIME = os.getenv("SOCIAL_DAILY_UPLOAD_TIME", "23:30")  # Sharp 11:30 PM format for Social Stories (IG, FB, WA)
 DAILY_CLEANER_TIME = os.getenv("DAILY_CLEANER_TIME", "23:55")  # HH:MM format for daily stuck video cleaner (Runs after uploads)
 AUTORUN_ON_STARTUP = os.getenv("AUTORUN_ON_STARTUP", "true").lower() in ("1", "true", "yes")  # Automatically execute on startup (YouTube then Social)
-AUTORUN_INTERVAL_HOURS = int(os.getenv("AUTORUN_INTERVAL_HOURS", "8"))  # Automatically recur every 8 hours
-SOCIAL_DAILY_POST_LIMIT = int(os.getenv("SOCIAL_DAILY_POST_LIMIT", "3"))  # Maximum social runs per day (accommodates 8-hour interval: 24/8 = 3)
+AUTORUN_INTERVAL_HOURS = int(os.getenv("AUTORUN_INTERVAL_HOURS", "0"))  # 0 = disabled (startup-only trigger, recurring interval stopped)
+SOCIAL_DAILY_POST_LIMIT = int(os.getenv("SOCIAL_DAILY_POST_LIMIT", "3"))  # Maximum social runs per day
 YOUTUBE_DAILY_RUN_LIMIT = int(os.getenv("YOUTUBE_DAILY_RUN_LIMIT", "3"))  # Maximum YouTube runs per day (accommodates 8-hour interval: 24/8 = 3)
 
 # GitHub Actions Cloud Dispatch Configuration (Zero-delay sharp dispatch)
