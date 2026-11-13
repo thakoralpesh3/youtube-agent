@@ -11,11 +11,19 @@ Usage:
   python3 run_daily_now.py --force  # Forces immediate execution regardless of quota
 """
 
+import os
+import sys
+from pathlib import Path
+
+# Auto-switch to virtual environment if running with system Python
+REPO_ROOT = Path(__file__).resolve().parent
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python3"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON.resolve()):
+    os.execv(str(VENV_PYTHON.resolve()), [str(VENV_PYTHON.resolve())] + sys.argv)
+
 import argparse
 import datetime
 import logging
-import sys
-from pathlib import Path
 
 # Set up logging to stdout
 logging.basicConfig(
