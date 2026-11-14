@@ -198,18 +198,61 @@ class YouTubeAuth:
         redirect_uri = session.get("redirect_uri", "http://localhost:8088/") if session else "http://localhost:8088/"
         code_verifier = session.get("code_verifier") if session else None
 
-        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+        # 1. Attempt direct token exchange with Google OAuth token endpoint
+        creds = None
+        client_info = {}
+        if self.client_secret_file.exists():
+            try:
+                secret_data = json.loads(self.client_secret_file.read_text(encoding="utf-8"))
+                client_info = secret_data.get("installed") or secret_data.get("web") or {}
+            except Exception:
+                pass
 
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(self.client_secret_file), SCOPES
-        )
-        flow.redirect_uri = redirect_uri
-        if code_verifier:
-            flow.code_verifier = code_verifier
+        client_id = client_info.get("client_id")
+        client_secret = client_info.get("client_secret")
+        token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
 
-        flow.fetch_token(code=code)
-        creds = flow.credentials
+        if client_id and client_secret:
+            req_data = {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            }
+            if code_verifier:
+                req_data["code_verifier"] = code_verifier
+
+            try:
+                resp = requests.post(token_uri, data=req_data, timeout=15)
+                if resp.status_code == 200:
+                    tok_data = resp.json()
+                    creds = Credentials(
+                        token=tok_data.get("access_token"),
+                        refresh_token=tok_data.get("refresh_token"),
+                        token_uri=token_uri,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        scopes=SCOPES,
+                    )
+                else:
+                    logger.debug(f"Direct token endpoint exchange returned {resp.status_code}: {resp.text}")
+            except Exception as e:
+                logger.debug(f"Direct token endpoint exchange network error: {e}")
+
+        # 2. Fallback to InstalledAppFlow
+        if not creds:
+            os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+            os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(self.client_secret_file), SCOPES
+            )
+            flow.redirect_uri = redirect_uri
+            if code_verifier:
+                flow.code_verifier = code_verifier
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+
         if not creds:
             raise RuntimeError("Google OAuth token exchange returned no credentials.")
 
@@ -220,8 +263,6 @@ class YouTubeAuth:
         self.clear_session()
         logger.info(f"✅ YouTube OAuth2 credentials successfully saved to: {self.token_file.resolve()}")
         return creds
-        self.token_file = token_file or Path(config.YOUTUBE_TOKEN_FILE)
-        self._is_revoked: bool = False
 
     def has_credentials(self) -> bool:
         """Returns True if token.json or client_secret.json exists."""
