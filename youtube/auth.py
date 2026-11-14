@@ -167,6 +167,11 @@ class YouTubeAuth:
                         if "invalid_grant" in err_str or "revoked" in err_str or "deleted" in err_str:
                             logger.warning(f"YouTube refresh token is permanently revoked or expired: {ref_err}")
                             self._is_revoked = True
+                            try:
+                                from growth.whatsapp_notifier import whatsapp_notifier
+                                whatsapp_notifier.send_login_required_alert("YouTube Agent")
+                            except Exception:
+                                pass
                             return False
                         logger.warning(f"YouTube token refresh error (attempt {attempt + 1}/{max_retries}): {ref_err}")
                         time.sleep(1)
@@ -269,13 +274,18 @@ class YouTubeAuth:
                         from growth.notifier import notifier
                         notifier.send(
                             "⚠️ YouTube Login Required",
-                            "YouTube OAuth token expired. Please open a terminal and run: python3 upload_to_youtube.py",
+                            "YouTube OAuth token expired. Please open a terminal and run: python3 connect_accounts.py --login-youtube",
                             urgency="normal",
                             timeout_ms=10000,
                         )
                     except Exception:
                         pass
-                    raise RuntimeError("YouTube OAuth requires interactive user authorization in a terminal. Run 'python3 upload_to_youtube.py'.")
+                    try:
+                        from growth.whatsapp_notifier import whatsapp_notifier
+                        whatsapp_notifier.send_login_required_alert("YouTube Agent")
+                    except Exception:
+                        pass
+                    raise RuntimeError("YouTube OAuth requires interactive user authorization in a terminal. Run 'python3 connect_accounts.py --login-youtube'.")
 
                 logger.info("Initiating YouTube OAuth2 browser authentication flow...")
                 flow = InstalledAppFlow.from_client_secrets_file(

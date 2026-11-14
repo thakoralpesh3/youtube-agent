@@ -329,6 +329,74 @@ class WhatsAppNotifier:
 
         return False
 
+    def send_login_required_alert(
+        self,
+        service_name: str = "YouTube Agent",
+        force: bool = False,
+    ) -> bool:
+        """
+        Dispatches a specific, formatted WhatsApp alert informing the user that re-login is required.
+        """
+        if not getattr(config, "ENABLE_WHATSAPP_ALERTS", True):
+            return False
+
+        ist_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=5, minutes=30)
+        time_str = ist_now.strftime("%Y-%m-%d %H:%M:%S IST")
+
+        message = (
+            "🔑 *LOGIN REQUIRED ALERT* 🔑\n\n"
+            f"🤖 *Agent*: {service_name}\n"
+            "⚠️ *Status*: *Google OAuth Token Expired or Revoked*\n"
+            f"🕒 *Time*: {time_str}\n\n"
+            "👉 *Action Required*:\n"
+            "Please open your laptop terminal and run:\n"
+            "`python3 connect_accounts.py --login-youtube`\n\n"
+            "Then approve in your browser to resume automated video publishing!\n\n"
+            "_YouTube & Social Media AI Autonomous Monitor_"
+        )
+
+        dedupe_key = f"{service_name}:login_required"
+        if not force and self._is_in_cooldown(dedupe_key):
+            logger.info(f"⏳ [WhatsApp Alert] Re-login alert in cooldown for '{dedupe_key}'. Suppressing duplicate.")
+            return False
+
+        target_phone = getattr(config, "WHATSAPP_TARGET_PHONE", "") or os.getenv("WHATSAPP_TARGET_PHONE", "")
+        clean_target = self.clean_phone_number(target_phone)
+
+        logger.info(f"🚨 [WhatsApp Alert] Dispatching Re-Login alert for '{service_name}'...")
+
+        # 1. Try Meta Cloud API
+        if clean_target:
+            success, reason = self._send_via_cloud_api(clean_target, message)
+            if success:
+                logger.info(f"✅ [WhatsApp Alert] {reason}")
+                self._log_alert("DELIVERED", "MetaCloudAPI", service_name, message)
+                return True
+
+        # 2. Try CallMeBot Webhook
+        success, reason = self._send_via_callmebot(message)
+        if success:
+            logger.info(f"✅ [WhatsApp Alert] {reason}")
+            self._log_alert("DELIVERED", "CallMeBot", service_name, message)
+            return True
+
+        # 3. Try WhatsApp Web Automation (Local Firefox Profile)
+        if clean_target:
+            success, reason = self._send_via_whatsapp_web(clean_target, message)
+            if success:
+                logger.info(f"✅ [WhatsApp Alert] {reason}")
+                self._log_alert("DELIVERED", "WhatsAppWeb", service_name, message)
+                return True
+            else:
+                logger.warning(f"⚠️ [WhatsApp Alert] WhatsApp Web attempt failed: {reason}")
+                self._log_alert("FAILED", "WhatsAppWeb", service_name, message, reason=reason)
+        else:
+            reason = "No WHATSAPP_TARGET_PHONE configured in .env or config"
+            logger.warning(f"⚠️ [WhatsApp Alert] {reason}. Cannot route to phone.")
+            self._log_alert("FAILED", "ConfigMissing", service_name, message, reason=reason)
+
+        return False
+
 
 # Global singleton instance
 whatsapp_notifier = WhatsAppNotifier()

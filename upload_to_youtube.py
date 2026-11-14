@@ -315,7 +315,12 @@ def upload_all_pending(watch_mode: bool = False, max_uploads: Optional[int] = No
 
     # In unattended/daemon mode, do not fail or prompt if token is expired
     if not uploader.auth.is_token_valid() and (os.environ.get("NON_INTERACTIVE") == "1" or not sys.stdin or not sys.stdin.isatty()):
-        logger.info("ℹ️ YouTube OAuth token is unauthenticated or expired. Videos safely preserved in output/. Run 'python3 upload_to_youtube.py' in a terminal to authenticate.")
+        logger.info("ℹ️ YouTube OAuth token is unauthenticated or expired. Videos safely preserved in output/. Run 'python3 connect_accounts.py --login-youtube' in a terminal to authenticate.")
+        try:
+            from growth.whatsapp_notifier import whatsapp_notifier
+            whatsapp_notifier.send_login_required_alert("YouTube Agent")
+        except Exception:
+            pass
         return []
 
     # Verify authentication

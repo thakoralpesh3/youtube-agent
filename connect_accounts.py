@@ -112,13 +112,20 @@ def check_whatsapp() -> bool:
     try:
         from syndication.browser_uploader import BrowserUploader
         bu = BrowserUploader()
-        if bu.is_whatsapp_session_valid():
+        is_paired = bu.is_whatsapp_session_valid()
+        if is_paired:
             console.print("✅ [bold green]WhatsApp Web:[/bold green] Paired & Connected (Active session found)")
-            return True
         else:
             console.print("⚠️ [bold yellow]WhatsApp Web:[/bold yellow] No active paired session detected.")
             console.print("📱 To pair WhatsApp: Run './login_whatsapp.py' and scan QR code.")
-            return False
+
+        phone = getattr(config, "WHATSAPP_TARGET_PHONE", "") or os.getenv("WHATSAPP_TARGET_PHONE", "")
+        if phone:
+            console.print(f"   • [bold green]WhatsApp Alert Recipient:[/bold green] [bold cyan]{phone}[/bold cyan] (Active for automated alerts)")
+        else:
+            console.print("   • 💡 [dim]To get WhatsApp alerts if login is needed: Run[/dim] [bold cyan]python3 connect_accounts.py --set-phone +91XXXXXXXXXX[/bold cyan]")
+
+        return is_paired
     except Exception as e:
         console.print(f"❌ [bold red]WhatsApp Web:[/bold red] Error: {e}")
         return False
@@ -278,6 +285,41 @@ def main():
         "[dim]Inspects and links all required credentials, tokens, browsers, and media assets.[/dim]",
         border_style="cyan"
     ))
+
+    if "--set-phone" in sys.argv:
+        idx = sys.argv.index("--set-phone")
+        if idx + 1 < len(sys.argv):
+            phone = sys.argv[idx + 1].strip()
+            from growth.whatsapp_notifier import whatsapp_notifier
+            clean = whatsapp_notifier.clean_phone_number(phone)
+            if clean and len(clean) >= 10:
+                env_path = REPO_ROOT / ".env"
+                env_text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+                import re
+                if re.search(r"^WHATSAPP_TARGET_PHONE=.*", env_text, re.MULTILINE):
+                    env_text = re.sub(r"^WHATSAPP_TARGET_PHONE=.*", f"WHATSAPP_TARGET_PHONE={phone}", env_text, flags=re.MULTILINE)
+                else:
+                    env_text += f"\nWHATSAPP_TARGET_PHONE={phone}\n"
+                env_path.write_text(env_text, encoding="utf-8")
+
+                sc_path = REPO_ROOT / "social_credentials.json"
+                if sc_path.exists():
+                    import json
+                    sc_data = json.loads(sc_path.read_text(encoding="utf-8"))
+                    if "whatsapp" not in sc_data or not isinstance(sc_data["whatsapp"], dict):
+                        sc_data["whatsapp"] = {}
+                    sc_data["whatsapp"]["target_phone"] = phone
+                    sc_path.write_text(json.dumps(sc_data, indent=2), encoding="utf-8")
+
+                console.print(f"\n✅ [bold green]WhatsApp Alert Target Phone saved:[/bold green] [bold cyan]{phone}[/bold cyan]")
+                console.print("📱 Whenever YouTube or Social login/task requires action, an alert will be sent to your WhatsApp!")
+                return
+            else:
+                console.print(f"❌ [bold red]Invalid phone number:[/bold red] '{phone}'. Please include country code, e.g. +91XXXXXXXXXX")
+                return
+        else:
+            console.print("⚠️ Please provide a phone number: python3 connect_accounts.py --set-phone +91XXXXXXXXXX")
+            return
 
     if "--login-youtube" in sys.argv:
         console.print("\n🔑 [bold cyan]Initiating 1-Click YouTube Google OAuth Login & Runner...[/bold cyan]")
