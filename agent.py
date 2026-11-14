@@ -161,51 +161,53 @@ class YouTubeAgent:
         logger.info(f"✨ Standard Video Title: {script.title}")
         logger.info(f"📜 Total Chapters/Scenes: {len(script.scenes)}")
 
-        # 2. Synthesize Audio for all scenes (isolated in audio_long)
-        report(20, "Synthesizing voiceover narration for all chapters (Edge-TTS)...", 6)
-        scene_dicts = [s.model_dump() for s in script.scenes]
-        audios = self.audio_gen.generate_scene_audios(
-            scene_dicts,
-            run_dir,
-            lang="en",
-            subfolder="audio_long",
-            orientation="landscape",
-        )
-        report(40, f"Voiceover synthesized for {len(audios)} chapters", 6)
-
-        # 3. Generate 16:9 Landscape Visuals
-        report(45, "Generating 16:9 cinematic widescreen visual scenes...", 6)
-        image_paths = self.image_gen.generate_all_scenes(
-            scenes=scene_dicts,
-            run_dir=run_dir,
-            aspect_ratio="16:9",
-            width=1920,
-            height=1080,
-            callback=lambda c, t, m: report(45 + int((c / t) * 20), m, 6),
-        )
-        for i, sc in enumerate(audios):
-            sc["image_path"] = image_paths[i]
-        report(65, "All 16:9 visual scenes ready", 6)
-
-        # 4. Generate High-Converting 16:9 Custom Thumbnail
-        report(68, "Generating high-CTR 16:9 custom thumbnail...", 6)
-        thumbnail_path = run_dir / "thumbnail.jpg"
-        if thumbnail_path.exists() and thumbnail_path.stat().st_size > 5000:
-            logger.info("⚡ Checkpoint found: Reusing existing thumbnail.jpg")
-        else:
-            self.thumbnail_gen.generate_thumbnail(
-                headline=script.thumbnail_headline,
-                visual_prompt=script.thumbnail_visual_prompt,
-                output_path=thumbnail_path,
-            )
-        report(75, f"Custom thumbnail ready: {thumbnail_path.name}", 6)
-
-        # 5. Assemble 1080p Landscape Video with FFmpeg
+        # 2. Audio & Visual Assembly (with fast checkpoint reuse if video already compiled)
         final_video_path = run_dir / "final_video.mp4"
+        thumbnail_path = run_dir / "thumbnail.jpg"
+
         if final_video_path.exists() and final_video_path.stat().st_size > 100000:
-            logger.info(f"⚡ Checkpoint found: Reusing existing final_video.mp4")
+            logger.info("⚡ Checkpoint found: Reusing existing final_video.mp4 directly (skipping TTS & visual re-render)")
             report(88, "Reused existing assembled 16:9 video!", 6)
         else:
+            # 2. Synthesize Audio for all scenes (isolated in audio_long)
+            report(20, "Synthesizing voiceover narration for all chapters (Edge-TTS)...", 6)
+            scene_dicts = [s.model_dump() for s in script.scenes]
+            audios = self.audio_gen.generate_scene_audios(
+                scene_dicts,
+                run_dir,
+                lang="en",
+                subfolder="audio_long",
+                orientation="landscape",
+            )
+            report(40, f"Voiceover synthesized for {len(audios)} chapters", 6)
+
+            # 3. Generate 16:9 Landscape Visuals
+            report(45, "Generating 16:9 cinematic widescreen visual scenes...", 6)
+            image_paths = self.image_gen.generate_all_scenes(
+                scenes=scene_dicts,
+                run_dir=run_dir,
+                aspect_ratio="16:9",
+                width=1920,
+                height=1080,
+                callback=lambda c, t, m: report(45 + int((c / t) * 20), m, 6),
+            )
+            for i, sc in enumerate(audios):
+                sc["image_path"] = image_paths[i]
+            report(65, "All 16:9 visual scenes ready", 6)
+
+            # 4. Generate High-Converting 16:9 Custom Thumbnail
+            report(68, "Generating high-CTR 16:9 custom thumbnail...", 6)
+            if thumbnail_path.exists() and thumbnail_path.stat().st_size > 5000:
+                logger.info("⚡ Checkpoint found: Reusing existing thumbnail.jpg")
+            else:
+                self.thumbnail_gen.generate_thumbnail(
+                    headline=script.thumbnail_headline,
+                    visual_prompt=script.thumbnail_visual_prompt,
+                    output_path=thumbnail_path,
+                )
+            report(75, f"Custom thumbnail ready: {thumbnail_path.name}", 6)
+
+            # 5. Assemble 1080p Landscape Video with FFmpeg
             report(78, "Assembling 16:9 widescreen video with dynamic captions...", 6)
             music_files = list(config.MUSIC_DIR.glob("*.mp3")) + list(config.MUSIC_DIR.glob("*.wav"))
             bg_music = music_files[0] if music_files else None
