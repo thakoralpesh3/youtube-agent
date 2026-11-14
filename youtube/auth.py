@@ -96,6 +96,10 @@ class _OAuthCallbackServer:
                         b"<p style='font-size:16px;color:#94a3b8;'>Credentials received. You can now close this tab and return to your terminal.</p>"
                         b"</body></html>"
                     )
+                    try:
+                        self.wfile.flush()
+                    except Exception:
+                        pass
                     callback_self.done_event.set()
                 else:
                     self.send_response(204)
@@ -115,10 +119,14 @@ class _OAuthCallbackServer:
     def stop(self):
         if self.server:
             try:
+                time.sleep(0.5)
                 self.server.shutdown()
                 self.server.server_close()
             except Exception:
                 pass
+
+
+SESSION_FILE = Path(getattr(config, "OUTPUT_DIR", "output")) / ".oauth_session.json"
 
 
 class YouTubeAuth:
@@ -128,6 +136,90 @@ class YouTubeAuth:
         token_file: Optional[Path] = None,
     ):
         self.client_secret_file = client_secret_file or Path(config.YOUTUBE_CLIENT_SECRET_FILE)
+        self.token_file = token_file or Path(config.YOUTUBE_TOKEN_FILE)
+        self._is_revoked: bool = False
+
+    @staticmethod
+    def save_session(code_verifier: str, state: str, redirect_uri: str, auth_url: str) -> None:
+        try:
+            SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "code_verifier": code_verifier,
+                "state": state,
+                "redirect_uri": redirect_uri,
+                "auth_url": auth_url,
+                "timestamp": time.time(),
+            }
+            SESSION_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Could not persist oauth session: {e}")
+
+    @staticmethod
+    def load_session() -> Optional[Dict[str, Any]]:
+        try:
+            if SESSION_FILE.exists():
+                return json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def clear_session() -> None:
+        try:
+            if SESSION_FILE.exists():
+                SESSION_FILE.unlink()
+        except Exception:
+            pass
+
+    def exchange_code(self, code_or_url: str) -> Credentials:
+        """
+        Exchanges an authorization code or callback URL for valid OAuth2 credentials
+        using persisted PKCE code_verifier.
+        """
+        raw = code_or_url.strip()
+        code = raw
+
+        if "code=" in raw:
+            try:
+                parsed = urlparse(raw)
+                qs = parse_qs(parsed.query)
+                extracted = qs.get("code", [None])[0]
+                if extracted:
+                    code = extracted
+            except Exception:
+                pass
+
+        if "error=access_denied" in raw.lower():
+            raise RuntimeError(
+                "Google returned 'access_denied'. Please add your email to 'Test users' in Google Cloud Console."
+            )
+
+        session = self.load_session()
+        redirect_uri = session.get("redirect_uri", "http://localhost:8088/") if session else "http://localhost:8088/"
+        code_verifier = session.get("code_verifier") if session else None
+
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(self.client_secret_file), SCOPES
+        )
+        flow.redirect_uri = redirect_uri
+        if code_verifier:
+            flow.code_verifier = code_verifier
+
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        if not creds:
+            raise RuntimeError("Google OAuth token exchange returned no credentials.")
+
+        self.token_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.token_file, "w") as token_out:
+            token_out.write(creds.to_json())
+        self._is_revoked = False
+        self.clear_session()
+        logger.info(f"✅ YouTube OAuth2 credentials successfully saved to: {self.token_file.resolve()}")
+        return creds
         self.token_file = token_file or Path(config.YOUTUBE_TOKEN_FILE)
         self._is_revoked: bool = False
 
@@ -301,7 +393,13 @@ class YouTubeAuth:
                 port = cb_server.port if server_started else 8088
 
                 flow.redirect_uri = f"http://localhost:{port}/"
-                auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+                auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
+                self.save_session(
+                    code_verifier=flow.code_verifier,
+                    state=state,
+                    redirect_uri=flow.redirect_uri,
+                    auth_url=auth_url,
+                )
 
                 print("\n" + "=" * 70)
                 print("🔑 GOOGLE OAUTH 2.0 YOUTUBE AUTHORIZATION")
@@ -329,11 +427,11 @@ class YouTubeAuth:
                 print(f"\n⏳ Listening on http://localhost:{port}/ (or paste redirected URL / code below):")
                 user_pasted_response = None
                 start_wait = time.time()
-                timeout_limit = 180  # 3 minutes maximum to prevent hanging
+                timeout_limit = 600  # 10 minutes maximum to give plenty of time
 
                 while not cb_server.done_event.is_set():
                     if time.time() - start_wait > timeout_limit:
-                        print("\n⏳ Authorization timed out after 3 minutes. Please run again when ready.")
+                        print("\n⏳ Authorization timed out after 10 minutes. Please run again when ready.")
                         break
                     try:
                         rlist, _, _ = select.select([sys.stdin], [], [], 0.5)
@@ -368,21 +466,23 @@ class YouTubeAuth:
                         "=" * 70
                     )
 
+                # Safely extract code parameter
+                code = str(auth_resp).strip()
+                if "code=" in code:
+                    try:
+                        parsed = urlparse(code)
+                        qs = parse_qs(parsed.query)
+                        extracted = qs.get("code", [None])[0]
+                        if extracted:
+                            code = extracted
+                    except Exception:
+                        pass
+
                 creds = None
                 try:
-                    # Ensure insecure transport is allowed for localhost callback
                     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
                     os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
-
-                    # Convert to https for oauthlib RFC 6749 compliance
-                    token_auth_resp = auth_resp
-                    if token_auth_resp.startswith("http:"):
-                        token_auth_resp = "https:" + token_auth_resp[5:]
-
-                    if "code=" in token_auth_resp:
-                        flow.fetch_token(authorization_response=token_auth_resp)
-                    else:
-                        flow.fetch_token(code=token_auth_resp.strip())
+                    flow.fetch_token(code=code)
                     creds = flow.credentials
                 except Exception as exchange_err:
                     err_s = str(exchange_err).lower()
@@ -400,6 +500,7 @@ class YouTubeAuth:
             with open(self.token_file, "w") as token_out:
                 token_out.write(creds.to_json())
             self._is_revoked = False
+            self.clear_session()
             logger.info(f"✅ YouTube OAuth2 credentials successfully saved to: {self.token_file.resolve()}")
 
         return creds
