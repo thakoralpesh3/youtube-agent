@@ -64,6 +64,10 @@ def _get_auth_request(timeout: int = 10) -> Request:
     return Request(session=session)
 
 
+class _ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
+
 class _OAuthCallbackServer:
     def __init__(self, ports=(8088, 8090, 8092, 8099)):
         self.ports = ports
@@ -99,7 +103,7 @@ class _OAuthCallbackServer:
 
         for p in self.ports:
             try:
-                self.server = HTTPServer(("localhost", p), _Handler)
+                self.server = _ReusableHTTPServer(("localhost", p), _Handler)
                 self.port = p
                 self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
                 self._thread.start()
@@ -324,8 +328,13 @@ class YouTubeAuth:
 
                 print(f"\n⏳ Listening on http://localhost:{port}/ (or paste redirected URL / code below):")
                 user_pasted_response = None
+                start_wait = time.time()
+                timeout_limit = 180  # 3 minutes maximum to prevent hanging
 
                 while not cb_server.done_event.is_set():
+                    if time.time() - start_wait > timeout_limit:
+                        print("\n⏳ Authorization timed out after 3 minutes. Please run again when ready.")
+                        break
                     try:
                         rlist, _, _ = select.select([sys.stdin], [], [], 0.5)
                         if rlist:
