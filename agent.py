@@ -670,53 +670,65 @@ class YouTubeAgent:
         logger.info(f"🇮🇳 HI Title: {package.hindi.title}")
         logger.info(f"🇮🇳 GU Title: {package.gujarati.title}")
 
-        # STEP 2: Synthesize Audios for all 3 languages (with scene checkpointing)
-        report(25, "Synthesizing voiceovers (English, Hindi, Gujarati)...", 2)
-        logger.info("🎙️ [Step 2/5] Synthesizing multilingual neural voiceovers...")
-        audios = {}
-        for lang_code, lang_obj in [("en", package.english), ("hi", package.hindi), ("gu", package.gujarati)]:
-            scenes_dict = [s.model_dump() for s in lang_obj.scenes]
-            folder = f"audio_{lang_code}" if lang_code != "en" else "audio"
-            audios[lang_code] = self.audio_gen.generate_scene_audios(
-                scenes_dict,
-                run_dir,
-                lang=lang_code,
-                subfolder=folder,
-                orientation="portrait",
-            )
-        report(45, "Voiceovers synthesized for all 3 languages", 2)
+        # Check if all 3 localized Shorts already exist on disk
+        all_shorts_exist = all(
+            (run_dir / f"final_short_{lc}.mp4").exists() and (run_dir / f"final_short_{lc}.mp4").stat().st_size > 50000
+            for lc in ["en", "hi", "gu"]
+        )
 
-        # STEP 3: Generate 9:16 Visuals (with scene checkpointing)
-        report(48, "Generating shared 9:16 vertical AI visual scenes...", 3)
-        logger.info("🎨 [Step 3/5] Generating shared 9:16 vertical visual scenes...")
-        scenes_for_visuals = [s.model_dump() for s in package.english.scenes]
-        image_paths = self.image_gen.generate_all_scenes(scenes_for_visuals, run_dir)
-        report(65, f"All {len(image_paths)} visual scenes rendered", 3)
-
-        # STEP 4: Assemble 3 Videos with localized fonts (with clip & video checkpointing)
-        report(68, "Assembling 3 localized vertical videos with animated captions...", 4)
-        logger.info("🎬 [Step 4/5] Assembling 3 localized vertical video versions...")
         final_videos = {}
-        music_files = list(config.MUSIC_DIR.glob("*.mp3")) + list(config.MUSIC_DIR.glob("*.wav"))
-        bg_music = music_files[0] if music_files else None
-
-        for lang_code in ["en", "hi", "gu"]:
-            for i, sc in enumerate(audios[lang_code]):
-                sc["image_path"] = image_paths[i]
-            out_video = run_dir / f"final_short_{lang_code}.mp4"
-            if out_video.exists() and out_video.stat().st_size > 50000:
-                logger.info(f"⚡ Checkpoint found: Reusing assembled video {out_video.name}")
-                final_videos[lang_code] = out_video
-            else:
-                self.video_assembler.assemble_video(
-                    scene_data=audios[lang_code],
-                    output_video_path=out_video,
-                    background_music_path=bg_music,
+        if all_shorts_exist:
+            logger.info("⚡ Checkpoint found: All 3 assembled localized videos exist. Reusing directly (skipping TTS & visual re-render).")
+            for lc in ["en", "hi", "gu"]:
+                final_videos[lc] = run_dir / f"final_short_{lc}.mp4"
+            report(85, "All 3 video language versions loaded from checkpoint!", 4)
+        else:
+            # STEP 2: Synthesize Audios for all 3 languages (with scene checkpointing)
+            report(25, "Synthesizing voiceovers (English, Hindi, Gujarati)...", 2)
+            logger.info("🎙️ [Step 2/5] Synthesizing multilingual neural voiceovers...")
+            audios = {}
+            for lang_code, lang_obj in [("en", package.english), ("hi", package.hindi), ("gu", package.gujarati)]:
+                scenes_dict = [s.model_dump() for s in lang_obj.scenes]
+                folder = f"audio_{lang_code}" if lang_code != "en" else "audio"
+                audios[lang_code] = self.audio_gen.generate_scene_audios(
+                    scenes_dict,
+                    run_dir,
                     lang=lang_code,
+                    subfolder=folder,
+                    orientation="portrait",
                 )
-                final_videos[lang_code] = out_video
+            report(45, "Voiceovers synthesized for all 3 languages", 2)
 
-        report(85, "All 3 video language versions assembled!", 4)
+            # STEP 3: Generate 9:16 Visuals (with scene checkpointing)
+            report(48, "Generating shared 9:16 vertical AI visual scenes...", 3)
+            logger.info("🎨 [Step 3/5] Generating shared 9:16 vertical visual scenes...")
+            scenes_for_visuals = [s.model_dump() for s in package.english.scenes]
+            image_paths = self.image_gen.generate_all_scenes(scenes_for_visuals, run_dir)
+            report(65, f"All {len(image_paths)} visual scenes rendered", 3)
+
+            # STEP 4: Assemble 3 Videos with localized fonts (with clip & video checkpointing)
+            report(68, "Assembling 3 localized vertical videos with animated captions...", 4)
+            logger.info("🎬 [Step 4/5] Assembling 3 localized vertical video versions...")
+            music_files = list(config.MUSIC_DIR.glob("*.mp3")) + list(config.MUSIC_DIR.glob("*.wav"))
+            bg_music = music_files[0] if music_files else None
+
+            for lang_code in ["en", "hi", "gu"]:
+                for i, sc in enumerate(audios[lang_code]):
+                    sc["image_path"] = image_paths[i]
+                out_video = run_dir / f"final_short_{lang_code}.mp4"
+                if out_video.exists() and out_video.stat().st_size > 50000:
+                    logger.info(f"⚡ Checkpoint found: Reusing assembled video {out_video.name}")
+                    final_videos[lang_code] = out_video
+                else:
+                    self.video_assembler.assemble_video(
+                        scene_data=audios[lang_code],
+                        output_video_path=out_video,
+                        background_music_path=bg_music,
+                        lang=lang_code,
+                    )
+                    final_videos[lang_code] = out_video
+
+            report(85, "All 3 video language versions assembled!", 4)
 
         pkg_dict = {
             "en": package.english.model_dump(),
