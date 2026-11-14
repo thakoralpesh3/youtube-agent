@@ -321,6 +321,37 @@ def main():
             console.print("⚠️ Please provide a phone number: python3 connect_accounts.py --set-phone +91XXXXXXXXXX")
             return
 
+    if "--exchange-code" in sys.argv:
+        idx = sys.argv.index("--exchange-code")
+        if idx + 1 < len(sys.argv):
+            code_input = sys.argv[idx + 1].strip()
+            from youtube.auth import YouTubeAuth
+            auth = YouTubeAuth()
+            try:
+                console.print("\n🔄 [bold cyan]Exchanging OAuth authorization response for YouTube tokens...[/bold cyan]")
+                auth.exchange_code(code_input)
+                console.print("✅ [bold green]YouTube OAuth2 token saved successfully![/bold green]")
+                ch_info = auth.verify_channel()
+                console.print(f"✅ [bold green]Connected Channel:[/bold green] [bold cyan]{ch_info.get('title')}[/bold cyan] (Videos: {ch_info.get('videos')}, Subs: {ch_info.get('subscribers')})")
+                try:
+                    from core.github_sync import sync_secrets_to_github
+                    sync_secrets_to_github()
+                except Exception:
+                    pass
+                upload_waiting_content()
+                resume_incomplete_youtube_runs()
+                manual_run_youtube_prompt()
+                console.print("\n" + "=" * 65)
+                console.print("🎯 [bold green]YOUTUBE 1-CLICK OPERATION COMPLETE![/bold green]")
+                console.print("=" * 65 + "\n")
+                return
+            except Exception as e:
+                console.print(f"❌ [bold red]Token exchange error:[/bold red] {e}")
+                return
+        else:
+            console.print("⚠️ Please provide code or URL: python3 connect_accounts.py --exchange-code \"<URL_OR_CODE>\"")
+            return
+
     if "--login-youtube" in sys.argv:
         console.print("\n🔑 [bold cyan]Initiating 1-Click YouTube Google OAuth Login & Runner...[/bold cyan]")
         yt_ok = check_youtube()
@@ -334,8 +365,10 @@ def main():
         else:
             console.print("\n" + "=" * 65)
             console.print("⚠️ [bold yellow]YOUTUBE LOGIN WAS NOT COMPLETED OR WAS CANCELLED[/bold yellow]")
-            console.print("👉 Please run 'python3 connect_accounts.py --login-youtube' in your terminal,")
-            console.print("   open the authorization link in your browser, and approve access.")
+            console.print("👉 2 EASY WAYS TO FINISH LOGIN:")
+            console.print("   1. Open the authorization link, approve access, and wait for redirect.")
+            console.print("   2. If browser shows 'Site can't be reached', copy that browser address bar URL and run:")
+            console.print("      python3 connect_accounts.py --exchange-code \"<COPIED_URL>\"")
             console.print("=" * 65 + "\n")
         return
 
