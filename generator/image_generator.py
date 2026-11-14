@@ -31,7 +31,10 @@ class ImageSafetyScanner:
 
         if not client and config.GEMINI_API_KEY:
             try:
-                client = genai.Client(api_key=config.GEMINI_API_KEY)
+                client = genai.Client(
+                    api_key=config.GEMINI_API_KEY,
+                    http_options=types.HttpOptions(timeout=15000.0)
+                )
             except Exception:
                 pass
 
@@ -58,11 +61,11 @@ class ImageSafetyScanner:
                         model=model,
                         contents=[pil_img, prompt],
                     )
-                    reply = res.text.strip().upper()
+                    reply = res.text.strip().upper() if res and res.text else ""
                     if reply.startswith("SAFE"):
                         logger.info(f"🛡️ [Vision Safety Scanner] Image '{image_path.name}' VERIFIED SAFE by {model}")
                         return True
-                    else:
+                    elif "UNSAFE" in reply:
                         logger.warning(f"🚨 [Vision Safety Scanner] Image '{image_path.name}' REJECTED as UNSAFE by {model}: {res.text.strip()}")
                         return False
                 except Exception as ex:
@@ -81,7 +84,10 @@ class ImageGenerator:
         self.client = None
         if self.api_key:
             try:
-                self.client = genai.Client(api_key=self.api_key)
+                self.client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(timeout=45000.0)
+                )
             except Exception as e:
                 logger.warning(f"Could not initialize GenAI client for images: {e}")
 

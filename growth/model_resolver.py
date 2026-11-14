@@ -212,8 +212,12 @@ class ModelResolver:
 
         try:
             from google import genai
+            from google.genai import types
 
-            client = genai.Client(api_key=self.api_key)
+            client = genai.Client(
+                api_key=self.api_key,
+                http_options=types.HttpOptions(timeout=20000.0)
+            )
             all_models = list(client.models.list())
 
             argon_models: List[Tuple[Tuple[int, ...], bool, str]] = []

@@ -29,8 +29,12 @@ class SelfHealer:
         # 1. Gemini API Health
         try:
             from google import genai
+            from google.genai import types
             from growth.model_resolver import call_gemini_resilient
-            client = genai.Client(api_key=config.GEMINI_API_KEY)
+            client = genai.Client(
+                api_key=config.GEMINI_API_KEY,
+                http_options=types.HttpOptions(timeout=15000.0)
+            )
             res, active_model = call_gemini_resilient(
                 client=client,
                 contents="ping",
