@@ -22,6 +22,10 @@ try:
 except Exception:
     pass
 
+# Allow local http redirect for loopback server & relax scope checks
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 import requests
 from requests.adapters import HTTPAdapter
 from google.auth.exceptions import RefreshError, TransportError
@@ -61,7 +65,7 @@ def _get_auth_request(timeout: int = 10) -> Request:
 
 
 class _OAuthCallbackServer:
-    def __init__(self, ports=(8088, 8090, 8085)):
+    def __init__(self, ports=(8088, 8090, 8092, 8099)):
         self.ports = ports
         self.port: Optional[int] = None
         self.auth_response: Optional[str] = None
@@ -75,18 +79,23 @@ class _OAuthCallbackServer:
             def log_message(self, format, *args):
                 pass
             def do_GET(self):
-                callback_self.auth_response = f"http://localhost:{callback_self.port}" + self.path
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(
-                    b"<html><head><title>Authentication Successful</title></head>"
-                    b"<body style='font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:50px;background:#0f172a;color:#f8fafc;'>"
-                    b"<h1 style='color:#10b981;font-size:28px;'>&#x2705; YouTube Login Successful!</h1>"
-                    b"<p style='font-size:16px;color:#94a3b8;'>Credentials received. You can now close this tab and return to your terminal.</p>"
-                    b"</body></html>"
-                )
-                callback_self.done_event.set()
+                # Filter out non-OAuth requests (e.g. /favicon.ico)
+                if "code=" in self.path or "error=" in self.path:
+                    callback_self.auth_response = f"http://localhost:{callback_self.port}" + self.path
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(
+                        b"<html><head><title>Authentication Successful</title></head>"
+                        b"<body style='font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:50px;background:#0f172a;color:#f8fafc;'>"
+                        b"<h1 style='color:#10b981;font-size:28px;'>&#x2705; YouTube Login Successful!</h1>"
+                        b"<p style='font-size:16px;color:#94a3b8;'>Credentials received. You can now close this tab and return to your terminal.</p>"
+                        b"</body></html>"
+                    )
+                    callback_self.done_event.set()
+                else:
+                    self.send_response(204)
+                    self.end_headers()
 
         for p in self.ports:
             try:
@@ -342,10 +351,19 @@ class YouTubeAuth:
 
                 creds = None
                 try:
-                    if auth_resp.startswith("http"):
-                        flow.fetch_token(authorization_response=auth_resp)
+                    # Ensure insecure transport is allowed for localhost callback
+                    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+                    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
+                    # Convert to https for oauthlib RFC 6749 compliance
+                    token_auth_resp = auth_resp
+                    if token_auth_resp.startswith("http:"):
+                        token_auth_resp = "https:" + token_auth_resp[5:]
+
+                    if "code=" in token_auth_resp:
+                        flow.fetch_token(authorization_response=token_auth_resp)
                     else:
-                        flow.fetch_token(code=auth_resp.strip())
+                        flow.fetch_token(code=token_auth_resp.strip())
                     creds = flow.credentials
                 except Exception as exchange_err:
                     err_s = str(exchange_err).lower()
@@ -362,6 +380,7 @@ class YouTubeAuth:
             self.token_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.token_file, "w") as token_out:
                 token_out.write(creds.to_json())
+            self._is_revoked = False
             logger.info(f"✅ YouTube OAuth2 credentials successfully saved to: {self.token_file.resolve()}")
 
         return creds
