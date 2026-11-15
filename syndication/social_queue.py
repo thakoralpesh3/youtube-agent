@@ -161,7 +161,25 @@ class SocialQueueManager:
         items = self.load_queue()
         pending = []
         needs_save = False
+        now = datetime.datetime.now()
         for item in items:
+            # Expire ephemeral stories older than 48 hours to prevent infinite backlog thrashing
+            created_str = item.get("created_at")
+            if created_str:
+                try:
+                    c_dt = datetime.datetime.strptime(created_str, "%Y-%m-%d %H:%M:%S")
+                    if (now - c_dt).total_seconds() > 48 * 3600:
+                        if item.get("status") != "EXPIRED":
+                            item["status"] = "EXPIRED"
+                            item["pending_platforms"] = []
+                            needs_save = True
+                        continue
+                except Exception:
+                    pass
+
+            if item.get("status") in ("EXHAUSTED", "EXPIRED", "COMPLETED"):
+                continue
+
             # Auto-reactivate any items previously marked ARCHIVED_STALE if media still exists
             if item.get("status") in ("PENDING", "ARCHIVED_STALE") and item.get("pending_platforms"):
                 mpath = Path(item.get("media_path", ""))
@@ -444,10 +462,25 @@ class SocialQueueManager:
                         metadata={"source": "pending_sweep"},
                     )
 
-        # 3. Re-activate stale items that still have pending platforms
+        # 3. Clean and check stale items
         items = self.load_queue()
+        now = datetime.datetime.now()
         needs_save = False
         for it in items:
+            created_str = it.get("created_at")
+            is_old = False
+            if created_str:
+                try:
+                    c_dt = datetime.datetime.strptime(created_str, "%Y-%m-%d %H:%M:%S")
+                    is_old = (now - c_dt).total_seconds() > 48 * 3600
+                except Exception:
+                    pass
+            if is_old:
+                if it.get("status") != "EXPIRED":
+                    it["status"] = "EXPIRED"
+                    it["pending_platforms"] = []
+                    needs_save = True
+                continue
             if it.get("status") == "ARCHIVED_STALE" and len(it.get("pending_platforms", [])) > 0:
                 p = Path(it.get("media_path", ""))
                 if p.exists():

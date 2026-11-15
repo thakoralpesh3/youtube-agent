@@ -339,6 +339,8 @@ class BrowserUploader:
         else:
             service = Service()
         driver = webdriver.Firefox(service=service, options=options)
+        driver.set_page_load_timeout(45)
+        driver.set_script_timeout(30)
         driver.set_window_size(*viewport)
         return driver
 
@@ -623,10 +625,10 @@ class BrowserUploader:
             # Dismiss any welcome / update modals if present
             self.dismiss_overlays(driver)
 
-            # Wait for WhatsApp Web to connect and show Status button (up to 120s)
+            # Wait for WhatsApp Web to connect and show Status button (up to 50s)
             logger.info("⏳ [WhatsApp Web] Waiting for WhatsApp Web session to connect...")
             status_btn = None
-            for tick in range(60):
+            for tick in range(25):
                 self.dismiss_overlays(driver)
                 btns = driver.find_elements(
                     By.XPATH,
@@ -660,12 +662,11 @@ class BrowserUploader:
                         status_btn = rail_icons[0]
                         break
 
-                # Detection of QR code scan: only check after at least 60s (tick >= 30)
-                # to give ample time for IndexedDB decryption, and ensure no loading progress or chat list
-                if tick >= 30:
+                # Fast detection of QR code scan (from tick >= 2 onwards)
+                if tick >= 2:
                     qr_elements = driver.find_elements(
                         By.XPATH,
-                        "//div[@data-ref] | //*[@data-testid='qrcode']//canvas | //canvas[@aria-label='Scan this QR code to link a device!']"
+                        "//div[@data-ref] | //*[@data-testid='qrcode']//canvas | //canvas[@aria-label='Scan this QR code to link a device!'] | //canvas"
                     )
                     loading_elements = driver.find_elements(
                         By.XPATH,
@@ -682,7 +683,7 @@ class BrowserUploader:
                         return {
                             "status": "FAILED",
                             "platform": "whatsapp",
-                            "reason": "WhatsApp Web not logged in. Please scan QR code via 'python3 login_whatsapp.py'."
+                            "reason": "WhatsApp Web not logged in. Please scan QR code via 'python3 connect_accounts.py --login-browser'."
                         }
 
                 if tick > 0 and tick % 5 == 0:
@@ -842,10 +843,18 @@ class BrowserUploader:
             driver = self.get_driver()
             driver.get("https://www.instagram.com/")
 
-            wait = WebDriverWait(driver, 30)
-            time.sleep(5)
+            wait = WebDriverWait(driver, 15)
+            time.sleep(3)
             self.dismiss_overlays(driver)
             self._handle_instagram_login(driver)
+
+            if not self._is_instagram_logged_in(driver):
+                logger.warning("⚠️ [Instagram Web] Account is not logged in. Instagram upload skipped.")
+                return {
+                    "status": "FAILED",
+                    "platform": "instagram",
+                    "reason": "Instagram login required. Enter credentials in .env or run 'python3 connect_accounts.py --login-browser'."
+                }
 
             # Click Create in left navigation using robust selectors
             create_btn = None
@@ -860,29 +869,8 @@ class BrowserUploader:
                     ))
                 )
             except Exception:
-                logger.info("⚠️ Create button not found immediately. Checking login state...")
-                self._handle_instagram_login(driver)
-                if not self._is_instagram_logged_in(driver):
-                    logger.warning("⚠️ [Instagram Web] Account is not logged in. Instagram upload skipped.")
-                    return {
-                        "status": "FAILED",
-                        "platform": "instagram",
-                        "reason": "Instagram login required. Enter credentials in .env or run 'python3 connect_accounts.py --login-browser'."
-                    }
-                try:
-                    wait_retry = WebDriverWait(driver, 15)
-                    create_btn = wait_retry.until(
-                        EC.presence_of_element_located((
-                            By.XPATH,
-                            "//*[local-name()='svg' and (@aria-label='New post' or @aria-label='Create')]/ancestor::div[@role='button' or self::a or self::div][1] | "
-                            "//a[contains(@href, '/create/') or .//span[text()='Create']] | "
-                            "//div[@role='button' and .//span[text()='Create']] | "
-                            "//*[@aria-label='New post'] | //*[@aria-label='Create']"
-                        ))
-                    )
-                except Exception:
-                    logger.warning("⚠️ [Instagram Web] Create button not found after login check.")
-                    return {"status": "FAILED", "platform": "instagram", "reason": "Create button not found"}
+                logger.warning("⚠️ [Instagram Web] Create button not found after login check.")
+                return {"status": "FAILED", "platform": "instagram", "reason": "Create button not found"}
             driver.execute_script("arguments[0].click();", create_btn)
             time.sleep(2)
 
