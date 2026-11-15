@@ -123,9 +123,13 @@ class DirectSocialApiUploader:
                 self.ig_client = cl
                 return self.ig_client
 
-            cl.expose = lambda *args, **kwargs: {}
-            self.ig_client = cl
-            return self.ig_client
+            if getattr(cl, "user_id", None):
+                cl.expose = lambda *args, **kwargs: {}
+                self.ig_client = cl
+                return self.ig_client
+
+            logger.info("ℹ️ [Instagram API] No authenticated Instagram session found.")
+            return None
         except Exception as e:
             logger.warning(f"Could not initialize instagrapi Client: {e}")
             return None

@@ -92,33 +92,39 @@ class SocialQueueManager:
 
         pending_platforms = [p for p in target_platforms if p not in published_platforms]
 
+        # Ignore thumbnail image artifacts (e.g. video.mp4.jpg) from video player previews
+        if any(media_path.name.lower().endswith(f"{ext}.jpg") for ext in [".mp4", ".mov", ".avi", ".webm", ".mkv"]):
+            return {"status": "SKIPPED", "pending_platforms": [], "published_platforms": []}
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = f"social_{int(time.time())}_{uuid.uuid4().hex[:6]}"
 
-        # Move media file to Story/pending/
-        dest_media_name = f"{timestamp}_{media_path.name}"
-        dest_media_path = self.pending_dir / dest_media_name
-
-        is_post_media = "post" in [p.lower() for p in media_path.parts]
-        if media_path.exists():
-            try:
-                if is_post_media:
-                    shutil.copy2(str(media_path), str(dest_media_path))
-                    logger.info(f"🔒 [Social Queue] Preserved original '{media_path.name}' in {media_path.parent} (never deleted)!")
-                else:
-                    shutil.move(str(media_path), str(dest_media_path))
-            except Exception:
-                shutil.copy2(str(media_path), str(dest_media_path))
+        # If already in pending directory, preserve path without redundant re-copying
+        if media_path.parent.resolve() == self.pending_dir.resolve():
+            dest_media_path = media_path
         else:
-            # Check if file was already moved to completed directory by another worker
-            completed_matches = list(self.completed_dir.glob(f"*_{media_path.name}"))
-            if completed_matches:
-                logger.info(f"✨ [Social Queue] '{media_path.name}' is already completed ({completed_matches[0].name}). Skipping duplicate enqueue.")
-                return {"status": "COMPLETED", "pending_platforms": [], "published_platforms": target_platforms}
-            if not self.pending_dir.joinpath(media_path.name).exists() and not media_path.exists():
-                logger.warning(f"⚠️ [Social Queue] Cannot enqueue non-existent media: {media_path}")
-                return {"status": "FAILED", "pending_platforms": [], "published_platforms": []}
-            dest_media_path = media_path  # If already in pending
+            dest_media_name = f"{timestamp}_{media_path.name}"
+            dest_media_path = self.pending_dir / dest_media_name
+            is_post_media = "post" in [p.lower() for p in media_path.parts]
+            if media_path.exists():
+                try:
+                    if is_post_media:
+                        shutil.copy2(str(media_path), str(dest_media_path))
+                        logger.info(f"🔒 [Social Queue] Preserved original '{media_path.name}' in {media_path.parent} (never deleted)!")
+                    else:
+                        shutil.move(str(media_path), str(dest_media_path))
+                except Exception:
+                    shutil.copy2(str(media_path), str(dest_media_path))
+            else:
+                # Check if file was already moved to completed directory by another worker
+                completed_matches = list(self.completed_dir.glob(f"*_{media_path.name}"))
+                if completed_matches:
+                    logger.info(f"✨ [Social Queue] '{media_path.name}' is already completed ({completed_matches[0].name}). Skipping duplicate enqueue.")
+                    return {"status": "COMPLETED", "pending_platforms": [], "published_platforms": target_platforms}
+                if not self.pending_dir.joinpath(media_path.name).exists() and not media_path.exists():
+                    logger.warning(f"⚠️ [Social Queue] Cannot enqueue non-existent media: {media_path}")
+                    return {"status": "FAILED", "pending_platforms": [], "published_platforms": []}
+                dest_media_path = media_path  # If already in pending
 
         # Save caption alongside media
         dest_caption_path = dest_media_path.with_suffix(".txt")
@@ -451,6 +457,8 @@ class SocialQueueManager:
         tracked_filenames = {Path(it.get("media_path", "")).name for it in items}
         for f in self.pending_dir.iterdir():
             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+                if f.name.startswith(".") or any(f.name.lower().endswith(f"{ext}.jpg") for ext in [".mp4", ".mov", ".avi", ".webm", ".mkv"]):
+                    continue
                 if f.name not in tracked_filenames:
                     cap_file = f.with_suffix(".txt")
                     caption = cap_file.read_text(encoding="utf-8").strip() if cap_file.exists() else "Royal Enfield Specialized Care #ChamundaAutomobile"

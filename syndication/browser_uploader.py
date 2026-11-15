@@ -236,7 +236,9 @@ class BrowserUploader:
                 s = src_storage / t
                 d = dst_storage / t
                 if s.exists():
-                    if ("whatsapp" in t or "instagram" in t or "facebook" in t) and not force and d.exists():
+                    if "whatsapp" in t and not should_sync_wa and d.exists():
+                        continue
+                    if ("instagram" in t or "facebook" in t) and not force and social_is_valid and d.exists():
                         continue
                     try:
                         if d.exists():
