@@ -337,28 +337,6 @@ class FestivalSocialAgent:
             "caption": caption,
         }
 
-    def run_daily_social_cycle(self, force: bool = False) -> Dict[str, Any]:
-        """
-        Executes the single daily social publishing cycle:
-        1. Checks strict 1-post-per-day rate limiter.
-        2. On festival days: generates and posts Chamunda Automobile Royal Enfield greeting card & video.
-        3. On non-festival days: posts business content from Story/ or Story/Post/ (never deleted).
-        4. Retries any stored pending queue items if available.
-        Guarantees strictly 1 social post per calendar day.
-        """
-        today = datetime.date.today()
-        today_str = today.strftime("%Y-%m-%d")
-
-        # 0. Sweep all leftover pending stories across Instagram, Facebook, WhatsApp
-        try:
-            from syndication.social_queue import SocialQueueManager
-            qm = SocialQueueManager()
-            leftover_res = qm.sweep_and_publish_all_leftover_stories(max_items=10)
-            if leftover_res.get("published_count", 0) > 0:
-                logger.info(f"✨ [Daily Social Agent] Leftover sweep published {leftover_res['published_count']} story items.")
-        except Exception as e:
-            logger.debug(f"Leftover sweep notice: {e}")
-
     def _get_daily_re_showcase_info(self, today: datetime.date) -> FestivalInfo:
         """Produces daily Royal Enfield showcase & maintenance theme for non-festival days."""
         day_name = today.strftime("%A")
