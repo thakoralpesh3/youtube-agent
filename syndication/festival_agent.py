@@ -375,16 +375,6 @@ class FestivalSocialAgent:
         today = datetime.date.today()
         today_str = today.strftime("%Y-%m-%d")
 
-        # 0. Sweep all leftover pending stories across Instagram, Facebook, WhatsApp
-        try:
-            from syndication.social_queue import SocialQueueManager
-            qm = SocialQueueManager()
-            leftover_res = qm.sweep_and_publish_all_leftover_stories(max_items=10)
-            if leftover_res.get("published_count", 0) > 0:
-                logger.info(f"✨ [Daily Social Agent] Leftover sweep published {leftover_res['published_count']} story items.")
-        except Exception as e:
-            logger.debug(f"Leftover sweep notice: {e}")
-
         if not force:
             if not is_social_upload_window():
                 logger.info(
@@ -431,15 +421,18 @@ class FestivalSocialAgent:
             if res:
                 return {"status": "COMPLETED", "source": "post_folder", "results": res}
 
-        # 4. Check Stored Pending Queue for Retries
+        # 4. Sweep and publish all leftover stories across Instagram, Facebook, and WhatsApp
         try:
             from syndication.social_queue import SocialQueueManager
             qm = SocialQueueManager()
-            qres = qm.retry_all_pending()
-            if qres.get("completed_count", 0) > 0:
-                return {"status": "COMPLETED", "source": "queue_retry", "results": qres}
+            leftover_res = qm.sweep_and_publish_all_leftover_stories(max_items=10)
+            if leftover_res.get("published_count", 0) > 0:
+                logger.info(f"✨ [Daily Social Agent] Leftover sweep published {leftover_res['published_count']} story items.")
+                return {"status": "COMPLETED", "source": "leftover_sweep", "results": leftover_res}
         except Exception as e:
-            logger.debug(f"Queue retry notice: {e}")
+            logger.debug(f"Leftover sweep notice: {e}")
+
+        return {"status": "IDLE", "reason": "No pending actions", "date": today_str}
 
         logger.info("✨ [Daily Social Agent] Social workflow check complete.")
         return {"status": "IDLE", "reason": "No pending content or festival today", "date": today_str}

@@ -102,20 +102,27 @@ def run_daily_social_worker(force: bool = False):
             logger.info(f"✨ [11:30 PM Social Worker] Today's social upload cycle already completed for {today_str}. Standing by for tomorrow.")
             return
 
+        # Ensure we do not thrash CPU/RAM if YouTube agent is actively compiling video
+        if _YOUTUBE_RUN_LOCK.locked():
+            logger.info("⏳ [11:30 PM Social Worker] Waiting for YouTube rendering to finish to conserve RAM...")
+            with _YOUTUBE_RUN_LOCK:
+                pass
+
         logger.info("=" * 70)
         logger.info(f"📱 [11:30 PM Social Worker] Starting sharp 11:30 PM daily story publishing for {today_str}...")
         logger.info("   Target Features: WhatsApp Status | Instagram Story | Facebook Story")
         logger.info("=" * 70)
 
-        # 1. Sweep and publish all leftover stories across Instagram, Facebook, and WhatsApp
+        # 1. Generate & upload daily festive / promotional campaign content (video & poster) FIRST
+        sres = {}
         try:
-            from syndication.social_queue import SocialQueueManager
-            qm = SocialQueueManager()
-            leftover_soc = qm.sweep_and_publish_all_leftover_stories(max_items=10)
-            if leftover_soc.get("published_count", 0) > 0:
-                logger.info(f"🎉 [11:30 PM Social Worker] Leftover sweep published {leftover_soc['published_count']} story item(s)!")
+            from syndication.festival_agent import run_daily_social_agent
+            from growth.notifier import notifier
+            notifier.notify_social_start("Royal Enfield Chamunda Automobile")
+            sres = run_daily_social_agent(force=True)
+            logger.info(f"✅ [11:30 PM Social Worker] Daily generated story workflow finished with status: {sres.get('status', 'COMPLETED')}")
         except Exception as e:
-            logger.debug(f"Leftover social sweep notice: {e}")
+            logger.error(f"❌ [11:30 PM Social Worker] Generated content publishing error: {e}", exc_info=True)
 
         # 2. Upload contents from Post folder (Story/Post/) to WhatsApp, Instagram & Facebook stories
         try:
@@ -128,18 +135,19 @@ def run_daily_social_worker(force: bool = False):
         except Exception as e:
             logger.warning(f"⚠️ [11:30 PM Social Worker] Post folder upload notice: {e}")
 
-        # 3. Generate & upload daily festive / promotional campaign content (video & poster)
+        # 3. Sweep and publish all leftover stories across Instagram, Facebook, and WhatsApp
         try:
-            from syndication.festival_agent import run_daily_social_agent
-            from growth.notifier import notifier
-            notifier.notify_social_start("Royal Enfield Chamunda Automobile")
-            sres = run_daily_social_agent(force=force)
-            logger.info(f"✅ [11:30 PM Social Worker] Daily generated story workflow finished with status: {sres.get('status', 'COMPLETED')}")
+            from syndication.social_queue import SocialQueueManager
+            qm = SocialQueueManager()
+            leftover_soc = qm.sweep_and_publish_all_leftover_stories(max_items=10)
+            if leftover_soc.get("published_count", 0) > 0:
+                logger.info(f"🎉 [11:30 PM Social Worker] Leftover sweep published {leftover_soc['published_count']} story item(s)!")
         except Exception as e:
-            logger.error(f"❌ [11:30 PM Social Worker] Generated content publishing error: {e}", exc_info=True)
+            logger.debug(f"Leftover social sweep notice: {e}")
 
-        # 4. Mark today's sharp 11:30 PM cycle complete
-        social_limiter.mark_cycle_completed()
+        # 4. Mark today's sharp 11:30 PM cycle complete only if actually executed
+        if sres.get("status") not in ["SCHEDULED", "SKIPPED", "FAILED"]:
+            social_limiter.mark_cycle_completed()
 
         logger.info("=" * 70)
         logger.info(f"🏁 [11:30 PM Social Worker] Completed sharp 11:30 PM social publishing cycle for {today_str}!")
