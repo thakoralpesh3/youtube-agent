@@ -400,7 +400,8 @@ Reasoning Directives:
 - Do NOT include scene headers or stage directions. Output ONLY the spoken narration text in the requested native script.
 """
         from google import genai
-        client = genai.Client(api_key=self.api_key)
+        from google.genai import types
+        client = genai.Client(api_key=self.api_key, http_options=types.HttpOptions(timeout=25000.0))
         candidates = get_candidate_models(preferred=self.model_name, tier="argon")
 
         for model in candidates:
