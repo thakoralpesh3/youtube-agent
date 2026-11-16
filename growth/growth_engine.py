@@ -174,8 +174,10 @@ Respond ONLY with valid JSON matching this schema:
                 logger.info("🚀 Channel Growth Memory successfully updated with fresh winning formulas!")
                 return updated_memory
             except Exception as e:
-                logger.debug(f"Growth optimization model {model} failed: {e}")
+                logger.debug(f"Growth optimization model {model} notice: {e}")
+                continue
 
+        logger.info("ℹ️ Growth strategy using baseline memory; proceeding with video generation.")
         return memory
 
     def get_growth_prompt_context(self) -> str:

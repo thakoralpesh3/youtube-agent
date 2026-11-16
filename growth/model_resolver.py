@@ -34,6 +34,7 @@ DEPRECATED_MODELS = {
 }
 DEFAULT_TIER_FALLBACKS = {
     "argon": [
+        "gemini-3.6-flash",
         "gemini-3.1-flash-lite",
         "gemini-3-flash-preview",
         "gemini-4-argon",
@@ -42,6 +43,7 @@ DEFAULT_TIER_FALLBACKS = {
         "gemini-3.7-flash",
     ],
     "flash": [
+        "gemini-3.6-flash",
         "gemini-3.1-flash-lite",
         "gemini-3-flash-preview",
         "gemini-flash-latest",
@@ -51,6 +53,7 @@ DEFAULT_TIER_FALLBACKS = {
         "gemini-4-argon",
     ],
     "pro": [
+        "gemini-3.6-flash",
         "gemini-3.1-flash-lite",
         "gemini-3-flash-preview",
         "gemini-3.1-pro-preview",
@@ -59,6 +62,7 @@ DEFAULT_TIER_FALLBACKS = {
         "gemini-3.8-flash",
     ],
     "fast": [
+        "gemini-3.6-flash",
         "gemini-3.1-flash-lite",
         "gemini-3-flash-preview",
         "gemini-3.5-flash-lite",
@@ -66,6 +70,7 @@ DEFAULT_TIER_FALLBACKS = {
         "gemini-3.8-flash",
     ],
     "vision": [
+        "gemini-3.6-flash",
         "gemini-3.1-flash-lite",
         "gemini-3-flash-preview",
         "gemini-3.8-flash",
