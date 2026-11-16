@@ -22,7 +22,17 @@ class GrowthEngine:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or config.GEMINI_API_KEY
         self.memory_file = config.OUTPUT_DIR / "channel_growth.json"
-        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.client = (
+            genai.Client(
+                api_key=self.api_key,
+                http_options=types.HttpOptions(
+                    timeout=15000.0,
+                    retry_options=types.HttpRetryOptions(attempts=1)
+                )
+            )
+            if self.api_key
+            else None
+        )
 
     def load_growth_memory(self) -> dict:
         """Loads accumulated growth lessons and winning formulas."""
