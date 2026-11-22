@@ -55,6 +55,21 @@ def main():
     console.print("   [dim]3. Click 'Continue' to approve access.[/dim]\n")
 
     try:
+        # Check if authorization code or URL was passed directly as command line argument
+        input_code = None
+        for i, arg in enumerate(sys.argv[1:], start=1):
+            if "code=" in arg or arg.startswith("http") or arg.startswith("4/"):
+                input_code = arg.strip()
+                break
+            elif arg in ("--code", "-c") and i < len(sys.argv) - 1:
+                input_code = sys.argv[i + 1].strip()
+                break
+
+        if input_code:
+            console.print("\n[bold yellow]Exchanging pasted authorization code/URL for YouTube credentials...[/bold yellow]")
+            auth.exchange_code(input_code)
+            console.print("✅ [bold green]Authorization code exchanged successfully![/bold green]")
+
         from youtube.uploader import YouTubeUploader
         uploader = YouTubeUploader(auth=auth)
         # Accessing service triggers fresh login flow if expired

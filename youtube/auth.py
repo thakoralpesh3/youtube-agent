@@ -107,7 +107,7 @@ class _OAuthCallbackServer:
 
         for p in self.ports:
             try:
-                self.server = _ReusableHTTPServer(("localhost", p), _Handler)
+                self.server = _ReusableHTTPServer(("", p), _Handler)
                 self.port = p
                 self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
                 self._thread.start()
