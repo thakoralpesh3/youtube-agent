@@ -346,7 +346,7 @@ class SecurityGuard:
 
                         # Prioritize TCP listeners which represent listening servers/backdoors
                         if is_public and proto == "tcp":
-                            is_authorized_python = (port in [web_port, "8080", "8081"] and "python" in proc_info.lower())
+                            is_authorized_python = (port in [web_port, "8080", "8081", "8877", "8550", "3000"] and "python" in proc_info.lower())
                             if not any(svc in proc_info for svc in allowed_services) and not is_authorized_python:
                                 public_tcp_listeners.append(entry)
                         else:
