@@ -20,8 +20,9 @@ def lint_faceless_script(data: dict) -> dict:
     score = 100
 
     title = data.get("title", "")
-    scenes = data.get("scenes", [])
-    voiceover = data.get("voiceover_script", "")
+    target = data.get("english") or data.get("hindi") or data.get("gujarati") or data
+    scenes = target.get("scenes", [])
+    voiceover = target.get("voiceover_script", "")
 
     # If voiceover is not given, compile from scenes
     if not voiceover and scenes:
