@@ -37,10 +37,11 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Scopes required for uploading YouTube videos
+# Scopes required for uploading YouTube videos and analyzing performance/watch-time metrics
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.force-ssl",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
 
 
@@ -233,7 +234,7 @@ class YouTubeAuth:
                         token_uri=token_uri,
                         client_id=client_id,
                         client_secret=client_secret,
-                        scopes=SCOPES,
+                        scopes=tok_data.get("scope", "").split() or SCOPES,
                     )
                 else:
                     logger.debug(f"Direct token endpoint exchange returned {resp.status_code}: {resp.text}")
@@ -287,7 +288,8 @@ class YouTubeAuth:
         if not self.token_file.exists():
             return False
         try:
-            creds = Credentials.from_authorized_user_file(str(self.token_file), SCOPES)
+            # Preserve scopes originally granted in token.json so existing tokens refresh cleanly
+            creds = Credentials.from_authorized_user_file(str(self.token_file))
             if creds.valid:
                 return True
             if creds.refresh_token:
@@ -342,7 +344,8 @@ class YouTubeAuth:
         # 1. Check if token.json exists
         if self.token_file.exists():
             try:
-                creds = Credentials.from_authorized_user_file(str(self.token_file), SCOPES)
+                # Preserve scopes originally granted in token.json so existing tokens refresh cleanly
+                creds = Credentials.from_authorized_user_file(str(self.token_file))
             except Exception as e:
                 logger.warning(f"Failed to load existing token file: {e}")
                 creds = None
@@ -561,5 +564,6 @@ class YouTubeAuth:
             "custom_url": ch["snippet"].get("customUrl", ""),
             "subscribers": ch["statistics"].get("subscriberCount", "0"),
             "videos": ch["statistics"].get("videoCount", "0"),
+            "views": ch["statistics"].get("viewCount", "0"),
         }
 

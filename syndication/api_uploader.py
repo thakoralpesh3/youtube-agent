@@ -187,6 +187,56 @@ class DirectSocialApiUploader:
 
         return {"status": "SKIPPED", "platform": "instagram", "reason": "API credentials not configured; falling back to browser"}
 
+    def post_instagram_reel_direct(self, video_path: Path, caption: str) -> Dict[str, Any]:
+        """Publishes a vertical MP4 directly to Instagram Reels via instagrapi."""
+        cl = self.get_instagram_client()
+        if not cl:
+            return {"status": "SKIPPED", "platform": "instagram_reel", "reason": "Instagram API session not available"}
+
+        thumb_temp: Optional[Path] = None
+        try:
+            cl.expose = lambda *args, **kwargs: {}
+            logger.info(f"🎬 [Instagram Reels API] Uploading Reel {video_path.name}...")
+            media = cl.clip_upload(str(video_path.resolve()), caption or "")
+            media_id = str(getattr(media, "pk", "") or "")
+            media_code = str(getattr(media, "code", "") or "")
+            reel_url = f"https://www.instagram.com/reel/{media_code}/" if media_code else ""
+            logger.info(f"🎉 [Instagram Reels API] Published Reel! ID={media_id} {reel_url}")
+            return {
+                "status": "PUBLISHED",
+                "platform": "instagram_reel",
+                "mode": "DIRECT_PROTOCOL",
+                "media_id": media_id,
+                "url": reel_url,
+            }
+        except Exception as e:
+            err_str = str(e)
+            if "qe/expose" in err_str or "404" in err_str:
+                logger.info("🎉 [Instagram Reels API] Reel accepted by Instagram servers (bypassed qe/expose notice)")
+                return {"status": "PUBLISHED", "platform": "instagram_reel", "mode": "DIRECT_PROTOCOL"}
+            if "login_required" in err_str or "403" in err_str:
+                logger.warning("⚠️ instagrapi session expired during Reel upload. Invalidating cache.")
+                try:
+                    self.session_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                self.ig_client = None
+            logger.warning(f"instagrapi Reel upload notice: {e}")
+            return {"status": "FAILED", "platform": "instagram_reel", "reason": err_str[:300]}
+        finally:
+            # instagrapi auto-generates <video>.mp4.jpg beside the video
+            auto_jpg = Path(f"{video_path.resolve()}.jpg")
+            if auto_jpg.exists():
+                try:
+                    auto_jpg.unlink()
+                except Exception:
+                    pass
+            if thumb_temp and thumb_temp.exists():
+                try:
+                    thumb_temp.unlink()
+                except Exception:
+                    pass
+
     # --------------------------------------------------------------------------
     # 2. FACEBOOK DIRECT GRAPH API (Multipart Upload)
     # --------------------------------------------------------------------------

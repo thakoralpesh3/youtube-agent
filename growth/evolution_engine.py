@@ -113,18 +113,35 @@ class EvolutionEngine:
 
         sparks = []
         if self.client:
-            prompt = """
+            live_yt_context = ""
+            live_social_context = ""
+            try:
+                from growth.growth_engine import GrowthEngine
+                live_yt_context = GrowthEngine().get_growth_prompt_context("shorts")
+            except Exception:
+                pass
+            try:
+                from growth.social_analytics import SocialGrowthEngine
+                live_social_context = SocialGrowthEngine().get_social_prompt_context()
+            except Exception:
+                pass
+
+            prompt = f"""
 You are an elite, disruptive creative director, viral content architect, and storytelling maestro.
 Your mission is to SURPRISE the creator with 3 exceptionally creative, unexpected, and high-converting content ideas.
 
+LIVE CHANNEL & SOCIAL TELEMETRY (MUST INFORM YOUR IDEAS):
+{live_yt_context}
+{live_social_context}
+
 DOMAINS TO COVER:
 1. IDEA 1 (Mindset, Neuroscience & Living Organisms): High-Performance Adult Mindset, Stoicism, Brain Biology, and Bio-Resilience principles from Apex Predators & Living Nature (eagles, wolves, lions, ancient forests).
-   - Must have a counter-intuitive, unexpected angle (NOT generic motivation).
+   - Must have a counter-intuitive, unexpected angle (NOT generic motivation, and NEVER repeat saturated channel titles).
    - Format: YouTube Shorts (Trilingual: English, Hindi, Gujarati).
 
 2. IDEA 2 (Royal Enfield Special for Chamunda Automobile Parts & Services):
    - Specializes in Royal Enfield motorcycles ONLY.
-   - Rider heritage, engine thumping mechanics, Bullet/Classic/Himalayan road endurance, or workshop secrets.
+   - Rider heritage, engine thumping mechanics, Bullet/Classic/Himalayan road endurance, or workshop secrets calibrated to top-performing Reels.
    - Format: Social Media Story / Reel (Instagram, Facebook, WhatsApp).
 
 3. IDEA 3 (The Wildcard / Cross-Over Breakthrough):
@@ -135,7 +152,7 @@ For each idea, invent a compelling title, why it's a surprising breakthrough, an
 
 Respond ONLY with valid JSON matching this exact array schema:
 [
-  {
+  {{
     "id": "spark_1",
     "title": "Short Catchy Viral Title",
     "category": "mindset",
@@ -262,6 +279,19 @@ Respond ONLY with valid JSON matching this exact array schema:
             journal["mutated_hook_formulas"].append(chosen)
             if len(journal["mutated_hook_formulas"]) > 6:
                 journal["mutated_hook_formulas"].pop(0)
+
+        # Refresh channel & social growth analytics (cached 4h) so creative evolution always stays grounded
+        try:
+            from growth.growth_engine import GrowthEngine
+            GrowthEngine().evolve_channel_strategy(force=False, cache_hours=4.0)
+        except Exception as e:
+            logger.debug(f"GrowthEngine pulse notice: {e}")
+
+        try:
+            from growth.social_analytics import SocialGrowthEngine
+            SocialGrowthEngine().evolve_social_strategy(force=False, cache_hours=4.0)
+        except Exception as e:
+            logger.debug(f"SocialGrowthEngine pulse notice: {e}")
 
         # Refresh surprise sparks if active sparks are empty
         if not journal.get("active_sparks"):

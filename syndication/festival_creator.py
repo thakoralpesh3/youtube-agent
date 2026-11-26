@@ -15,7 +15,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -24,7 +24,7 @@ from generator.audio_generator import AudioGenerator, create_word_highlight_ass
 from generator.image_generator import ImageGenerator, ImageSafetyScanner
 from generator.script_generator import validate_family_safe
 from generator.video_assembler import VideoAssembler, get_ffmpeg_binary
-from growth.model_resolver import get_candidate_models
+from growth.model_resolver import call_gemini_resilient, get_candidate_models
 from syndication.festival_detector import FestivalInfo
 
 logger = logging.getLogger("festival_creator")
@@ -74,6 +74,56 @@ class ChamundaFestivalCreator:
         self.audio_gen = AudioGenerator()
         self.video_assembler = VideoAssembler()
         self.ffmpeg_bin = get_ffmpeg_binary()
+
+    def _get_social_analytics_context(self) -> Tuple[str, Dict[str, Any]]:
+        """Loads evolved Instagram/Facebook social growth intelligence safely."""
+        try:
+            from growth.social_analytics import SocialGrowthEngine
+
+            engine = SocialGrowthEngine()
+            mem = engine.load_social_memory()
+            return engine.get_social_prompt_context(), mem
+        except Exception as e:
+            logger.debug(f"Social analytics context fallback: {e}")
+            return "", {}
+
+    def _generate_broll_frames(
+        self,
+        festival: FestivalInfo,
+        poster_path: Path,
+        out_dir: Path,
+        slug: str,
+    ) -> List[Path]:
+        """Generates up to 2 extra vertical B-roll frames for dynamic multi-cut Reels."""
+        frames: List[Path] = [poster_path]
+        scene_prompts = [
+            (
+                f"Cinematic 9:16 vertical close-up inside a clean Royal Enfield motorcycle workshop in Kalol India, "
+                f"sparkling chrome exhaust pipes, genuine OEM Royal Enfield engine parts, proud mechanic inspecting tappet alignment, "
+                f"golden warm rim light, 8k photorealistic photography, theme: {festival.motorcycle_theme}, strictly no text overlay"
+            ),
+            (
+                f"Cinematic 9:16 vertical golden hour shot of a Royal Enfield Classic 350 and Himalayan cruising on an open Gujarat highway, "
+                f"rider in proper riding jacket and helmet, warm spiritual sunrise sky, motion depth, "
+                f"theme: {festival.festival_name}, strictly all-ages safe, no text overlay"
+            ),
+        ]
+        for idx, b_prompt in enumerate(scene_prompts, start=1):
+            b_path = out_dir / f"broll_{festival.date_str}_{slug}_{idx}.png"
+            if b_path.exists() and b_path.stat().st_size > 20000:
+                frames.append(b_path)
+                continue
+            try:
+                generated = self.image_gen.generate_scene_image(
+                    prompt=b_prompt,
+                    output_path=b_path,
+                    orientation="portrait",
+                )
+                if generated and Path(generated).exists() and Path(generated).stat().st_size > 20000:
+                    frames.append(Path(generated))
+            except Exception as e:
+                logger.debug(f"B-roll frame #{idx} generation skipped: {e}")
+        return frames
 
     # --------------------------------------------------------------------------
     # 1. FESTIVE POSTER (IMAGE) GENERATION
@@ -375,48 +425,46 @@ class ChamundaFestivalCreator:
     # --------------------------------------------------------------------------
     def _generate_video_script(self, festival: FestivalInfo, lang: str = "hi") -> str:
         """
-        Uses Gemini 4 Argon reasoning to generate a short, punchy 15-20s video narration script
-        blending the festival spirit with the iconic thump and pride of Royal Enfield.
+        Uses Gemini reasoning + live SocialGrowthEngine insights to generate a punchy
+        15-20s video narration script blending the theme with the iconic thump of Royal Enfield.
         """
         lang_name = "Gujarati (genuine Gujarati script)" if lang == "gu" else "Hindi (genuine Devanagari script)" if lang == "hi" else "English"
+        social_context, _ = self._get_social_analytics_context()
         prompt = f"""
-You are Gemini 4 Argon, Google's flagship reasoning engine.
-Write a high-energy, memorable 15 to 20 second festive video voiceover script for "Chamunda Auto Mobile Parts & Services" (ચામુંડા ઓટો મોબાઇલ પાર્ટસ & સર્વિસ) located at Kalol.
+You are an elite short-form automotive & devotional Reel scriptwriter for "Chamunda Auto Mobile Parts & Services" (ચામુંડા ઓટો મોબાઇલ પાર્ટસ & સર્વિસ) located at Kalol, Gujarat.
 Business Profile: Chamunda Automobile specializes EXCLUSIVELY in Royal Enfield motorcycles (Bullet 350, Classic 350, Hunter, Meteor, Himalayan 450, 650 Twins). Offers genuine RE spare parts, accessories, periodic maintenance, expert engine tuning, and custom modification.
 Location: 4, Sanidhya Arcade, Opp. Sindbad Hotel, Kalol.
 Contacts: Hitesh (8490001582) and Alpesh (7874719139).
 
-Target Festival: {festival.festival_name}
-Cultural Significance: {festival.significance}
+Target Theme / Festival: {festival.festival_name}
+Cultural / Technical Significance: {festival.significance}
 Motorcycle Theme: {festival.motorcycle_theme}
 Target Language: {lang_name}
+{social_context}
 
 Reasoning Directives:
-- Deep Cultural & Biker Resonance: Synthesize the spiritual energy of {festival.festival_name} with the legendary thump ("Dug-Dug") of Royal Enfield and Maa Chamunda's divine protection on every highway and mountain pass.
+- HOOK FIRST (First 3 seconds): Open immediately with an arresting question, bold Royal Enfield bike truth, or devotional goosebump invocation that stops Instagram Reels scrolling.
+- Deep Cultural & Biker Resonance: Synthesize {festival.festival_name} with the legendary thump ("Dug-Dug") of Royal Enfield and Maa Chamunda's blessings on every highway and mountain pass.
 - Length: Exactly 35 to 55 words (fits 15-20 seconds spoken pace).
 - Tone: Proud, celebratory, authoritative, passionate about the Royal Enfield heartbeat and rider safety.
-- STRICT CONTENT SAFETY (ZERO 18+ TOLERANCE): 100% wholesome, family-friendly, all-ages safe (suitable for children, youth, and elders). Strictly NO 18+ adult themes, vulgarity, swearing, violence, or controversial topics.
-- Mention Chamunda Auto Kalol for genuine Royal Enfield parts, service & modification, and wish all RE riders safe, powerful journeys.
+- STRICT CONTENT SAFETY (ZERO 18+ TOLERANCE): 100% wholesome, family-friendly, all-ages safe. Strictly NO 18+ adult themes, vulgarity, swearing, violence, or controversial topics.
+- Mention Chamunda Auto Kalol for genuine Royal Enfield parts, service & modification, and end with a clear prompt to save/share with an RE brother.
 - Do NOT include scene headers or stage directions. Output ONLY the spoken narration text in the requested native script.
 """
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=self.api_key, http_options=types.HttpOptions(timeout=25000.0))
-        candidates = get_candidate_models(preferred=self.model_name, tier="argon")
-
-        for model in candidates:
-            try:
-                res = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config={"temperature": 0.75},
-                )
-                text = res.text.strip().replace('"', "").replace("\n", " ")
-                if len(text) > 30:
-                    validate_family_safe(text)
-                    return text
-            except Exception as e:
-                logger.debug(f"Script model {model} failed: {e}")
+        try:
+            text, _model = call_gemini_resilient(
+                prompt=prompt,
+                preferred_model=self.model_name,
+                tier="argon",
+                temperature=0.75,
+                timeout_ms=25000.0,
+            )
+            cleaned = text.strip().replace('"', "").replace("\n", " ")
+            if len(cleaned) > 30:
+                validate_family_safe(cleaned)
+                return cleaned
+        except Exception as e:
+            logger.debug(f"Festive Reel script Gemini fallback: {e}")
 
         # Fallback pre-written scripts
         if lang == "gu":
@@ -481,64 +529,114 @@ Reasoning Directives:
 
         logger.info(f"🎬 Assembling final festive video for Chamunda Automobile ({duration:.1f}s)...")
 
-        d_frames = max(30, int((duration + 0.5) * 30))
+        frames = self._generate_broll_frames(festival, poster_path, out_dir, slug)
+        if len(frames) >= 2:
+            seg_dur = duration / len(frames)
+            seg_frames = max(30, int((seg_dur + 0.25) * 30))
+            input_args: List[str] = []
+            vid_chains: List[str] = []
+            concat_labels: List[str] = []
+            for idx, frame in enumerate(frames):
+                input_args.extend(["-loop", "1", "-t", f"{seg_dur:.2f}", "-i", str(frame.resolve())])
+                zoom_step = "0.0009" if idx % 2 == 0 else "0.0007"
+                vid_chains.append(
+                    f"[{idx}:v]scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
+                    f"zoompan=z='min(zoom+{zoom_step},1.10)':d={seg_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                    f"s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps=30,setsar=1[v{idx}]"
+                )
+                concat_labels.append(f"[v{idx}]")
 
-        # Ultra-realistic cinematic camera motion + film grading for festival poster
-        # Pre-scale to 2160x3840 for subpixel smoothness, Ken Burns slow push-in, warm festive color grading, optical lens vignette, organic 35mm film grain
-        cinematic_filter = (
-            f"scale=2160:3840,"
-            f"zoompan=z='min(zoom+0.0007,1.08)':d={d_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps=30,"
-            f"eq=contrast=1.08:brightness=0.01:saturation=1.12,"
-            f"vignette=PI/5:mode=backward,"
-            f"noise=c1s=3:c0f=u+t"
-        )
-        subtitle_filter = f"{cinematic_filter},ass='{ass_path.name}'"
-
-        if has_music:
-            # Sidechain compression / ducking filter: Speech attenuates music
-            filter_complex = (
-                f"[0:v]{subtitle_filter}[v];"
-                f"[2:a]volume=0.18[bgm];"
-                f"[bgm][1:a]sidechaincompress=threshold=0.08:ratio=8:attack=100:release=400[ducked_bgm];"
-                f"[ducked_bgm][1:a]amix=inputs=2:duration=first:dropout_transition=2[a]"
+            audio_idx = len(frames)
+            input_args.extend(["-i", str(audio_path.resolve())])
+            video_graph = (
+                f"{';'.join(vid_chains)};"
+                f"{''.join(concat_labels)}concat=n={len(frames)}:v=1:a=0,"
+                f"eq=contrast=1.08:brightness=0.01:saturation=1.12,"
+                f"vignette=PI/5:mode=backward,noise=c1s=3:c0f=u+t,ass='{ass_path.name}'[v]"
             )
+            if has_music:
+                music_idx = len(frames) + 1
+                input_args.extend(["-stream_loop", "-1", "-i", str(music_file.resolve())])
+                filter_complex = (
+                    f"{video_graph};"
+                    f"[{music_idx}:a]volume=0.18[bgm];"
+                    f"[bgm][{audio_idx}:a]sidechaincompress=threshold=0.08:ratio=8:attack=100:release=400[ducked_bgm];"
+                    f"[ducked_bgm][{audio_idx}:a]amix=inputs=2:duration=first:dropout_transition=2[a]"
+                )
+                audio_map = "[a]"
+            else:
+                filter_complex = video_graph
+                audio_map = f"{audio_idx}:a"
+
             cmd = [
-                self.ffmpeg_bin,
-                "-y",
-                "-loop", "1",
-                "-i", str(poster_path.resolve()),
-                "-i", str(audio_path.resolve()),
-                "-stream_loop", "-1",
-                "-i", str(music_file.resolve()),
+                self.ffmpeg_bin, "-y",
+                *input_args,
                 "-filter_complex", filter_complex,
-                "-map", "[v]",
-                "-map", "[a]",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-c:a", "aac",
-                "-b:a", "192k",
+                "-map", "[v]", "-map", audio_map,
+                "-c:v", "libx264", "-preset", "veryfast",
+                "-c:a", "aac", "-b:a", "192k",
                 "-t", f"{duration:.2f}",
                 "-pix_fmt", "yuv420p",
                 "-shortest",
                 str(final_video_path.resolve()),
             ]
         else:
-            cmd = [
-                self.ffmpeg_bin,
-                "-y",
-                "-loop", "1",
-                "-i", str(poster_path.resolve()),
-                "-i", str(audio_path.resolve()),
-                "-vf", subtitle_filter,
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-t", f"{duration:.2f}",
-                "-pix_fmt", "yuv420p",
-                str(final_video_path.resolve()),
-            ]
+            d_frames = max(30, int((duration + 0.5) * 30))
+
+            # Ultra-realistic cinematic camera motion + film grading for festival poster
+            cinematic_filter = (
+                f"scale=2160:3840,"
+                f"zoompan=z='min(zoom+0.0007,1.08)':d={d_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                f"s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps=30,"
+                f"eq=contrast=1.08:brightness=0.01:saturation=1.12,"
+                f"vignette=PI/5:mode=backward,"
+                f"noise=c1s=3:c0f=u+t"
+            )
+            subtitle_filter = f"{cinematic_filter},ass='{ass_path.name}'"
+
+            if has_music:
+                filter_complex = (
+                    f"[0:v]{subtitle_filter}[v];"
+                    f"[2:a]volume=0.18[bgm];"
+                    f"[bgm][1:a]sidechaincompress=threshold=0.08:ratio=8:attack=100:release=400[ducked_bgm];"
+                    f"[ducked_bgm][1:a]amix=inputs=2:duration=first:dropout_transition=2[a]"
+                )
+                cmd = [
+                    self.ffmpeg_bin,
+                    "-y",
+                    "-loop", "1",
+                    "-i", str(poster_path.resolve()),
+                    "-i", str(audio_path.resolve()),
+                    "-stream_loop", "-1",
+                    "-i", str(music_file.resolve()),
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]",
+                    "-map", "[a]",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-t", f"{duration:.2f}",
+                    "-pix_fmt", "yuv420p",
+                    "-shortest",
+                    str(final_video_path.resolve()),
+                ]
+            else:
+                cmd = [
+                    self.ffmpeg_bin,
+                    "-y",
+                    "-loop", "1",
+                    "-i", str(poster_path.resolve()),
+                    "-i", str(audio_path.resolve()),
+                    "-vf", subtitle_filter,
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-t", f"{duration:.2f}",
+                    "-pix_fmt", "yuv420p",
+                    str(final_video_path.resolve()),
+                ]
 
         # Execute FFmpeg in working directory where ass file resides
         proc = subprocess.run(cmd, cwd=str(ass_path.parent), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -576,7 +674,7 @@ Reasoning Directives:
     # 3. SOCIAL CAPTION GENERATOR
     # --------------------------------------------------------------------------
     def generate_caption(self, festival: FestivalInfo, lang: str = "hi") -> str:
-        """Generates an engaging, branded caption for Instagram, Facebook, and WhatsApp."""
+        """Generates an analytics-informed, branded caption for Instagram, Facebook, and WhatsApp."""
         blessing = (
             festival.blessing_message_gu
             if lang == "gu"
@@ -588,11 +686,46 @@ Reasoning Directives:
         fest_clean = festival.festival_name.split("/")[0].strip()
         fest_tag = re.sub(r"[^a-zA-Z0-9]+", "", fest_clean)
 
+        social_context, social_mem = self._get_social_analytics_context()
+        evolved_hook = ""
+        try:
+            prompt = (
+                f"Write a crisp 2-line Instagram Reel / Story opening hook in {lang.upper()} + punchy English for "
+                f"Chamunda Auto Mobile Parts & Services (Royal Enfield Only, Kalol Gujarat) on theme '{festival.festival_name}'. "
+                f"{social_context}\n"
+                "Rules: 100% family-safe, zero hashtags, include one clear save/share prompt for Royal Enfield riders."
+            )
+            text, _ = call_gemini_resilient(
+                prompt=prompt,
+                preferred_model=self.model_name,
+                tier="argon",
+                temperature=0.75,
+                timeout_ms=15000.0,
+            )
+            cleaned = text.strip().replace('"', "")
+            if len(cleaned) >= 15 and len(cleaned) <= 260:
+                validate_family_safe(cleaned)
+                evolved_hook = f"\n\n{cleaned}"
+        except Exception as e:
+            logger.debug(f"Adaptive social caption hook fallback: {e}")
+
+        base_tags = [
+            "#ChamundaAutomobile", "#RoyalEnfield", "#Bullet350", "#Classic350",
+            "#Himalayan450", "#Meteor350", "#Hunter350", "#ContinentalGT650",
+            "#Interceptor650", f"#{fest_tag}", "#GujaratBikers", "#Kalol", "#PureMotorcycling",
+        ]
+        for extra in (social_mem.get("top_hashtags") or []):
+            t = str(extra).strip()
+            if not t:
+                continue
+            if not t.startswith("#"):
+                t = f"#{t.lstrip('#')}"
+            if t.lower() not in {x.lower() for x in base_tags} and len(base_tags) < 18:
+                base_tags.append(t)
+
         caption = f"""🚩 {festival.greeting_headline} 🚩
 
-{blessing}
-
-May Maa Chamunda bless your life with boundless prosperity, peak health, and unshakeable power on every journey!
+{blessing}{evolved_hook}
 
 🏍️ CHAMUNDA (ચામુંડા)
 ઓટો મોબાઇલ પાર્ટસ & સર્વિસ
@@ -610,6 +743,6 @@ May Maa Chamunda bless your life with boundless prosperity, peak health, and uns
 
 Ride safe, ride proud, and let the heartbeat of your Royal Enfield thump strong!
 
-#ChamundaAutomobile #RoyalEnfield #Bullet350 #Classic350 #Himalayan450 #Meteor350 #Hunter350 #ContinentalGT650 #Interceptor650 #{fest_tag} #FestiveVibes #GujaratBikers #Kalol #MaaChamunda #PureMotorcycling #Story"""
+{" ".join(base_tags)}"""
 
         return caption.strip()

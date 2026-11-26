@@ -180,8 +180,11 @@
                     </div>
                     <p class="text-xs text-slate-300">The agent autonomously evolves its creative formulas and brainstorms unexpected viral suggestions for you.</p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 sm:gap-3">
                     <span class="text-xs text-slate-400 font-mono">Creative Score: <strong class="text-indigo-400" id="evo-score">155</strong></span>
+                    <button onclick="refreshAnalytics()" id="btn-analytics" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 font-semibold text-xs text-emerald-300 transition flex items-center gap-1.5">
+                        <span>📊 Analyze Growth</span>
+                    </button>
                     <button onclick="surpriseMe()" id="btn-surprise" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 font-bold text-xs text-white shadow-lg transition flex items-center gap-1.5">
                         <svg class="w-3.5 h-3.5" id="surprise-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -464,7 +467,10 @@
                     ytElem.innerText = 'Login Ready';
                     ytElem.className = 'text-sm sm:text-base font-bold text-amber-400';
                 }
-                document.getElementById('stat-yt-details').innerText = `Target: ${data.youtube ? data.youtube.privacy.toUpperCase() : 'UNLISTED'}`;
+                const ytStats = data.youtube_analytics
+                    ? ` | ${data.youtube_analytics.total_views || 0}v • ${data.youtube_analytics.total_estimated_watch_hours || 0}h`
+                    : '';
+                document.getElementById('stat-yt-details').innerText = `Target: ${data.youtube ? data.youtube.privacy.toUpperCase() : 'UNLISTED'}${ytStats}`;
 
                 // Social
                 const socElem = document.getElementById('stat-social');
@@ -474,6 +480,11 @@
                 } else {
                     socElem.innerText = 'Pending Setup';
                     socElem.className = 'text-sm sm:text-base font-bold text-amber-400';
+                }
+                if (data.social_analytics && document.getElementById('stat-social-details')) {
+                    const sa = data.social_analytics;
+                    document.getElementById('stat-social-details').innerText =
+                        sa.followers ? `${sa.followers} followers • Reels ${sa.reels_avg_views || 0}v avg` : 'IG • FB • WA Profile';
                 }
 
                 // Security
@@ -625,6 +636,21 @@
             } finally {
                 btn.disabled = false;
                 icon.classList.remove('animate-spin');
+            }
+        }
+
+        async function refreshAnalytics() {
+            const btn = document.getElementById('btn-analytics');
+            if (btn) btn.disabled = true;
+            showToast('Analyzing live YouTube & Social metrics...', '📊');
+            try {
+                const data = await apiFetch('/api/analytics/refresh', 'POST');
+                showToast(data.message || 'Growth telemetry refreshed!', '✅');
+                refreshData();
+            } catch (err) {
+                showToast('Analytics refresh failed. Check logs.', '❌');
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 

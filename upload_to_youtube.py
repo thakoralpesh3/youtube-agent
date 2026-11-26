@@ -20,6 +20,7 @@ if sys.prefix == sys.base_prefix:
 import hashlib
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Set
@@ -72,6 +73,32 @@ def _get_video_file_hash(video_path: Path) -> str:
         return h.hexdigest()
     except Exception:
         return str(video_path.name)
+
+
+def _normalize_title_key(title: str) -> str:
+    """Normalizes titles (ignoring #Shorts casing/punctuation) for duplicate checks."""
+    cleaned = re.sub(r"#\w+", "", (title or "").lower())
+    tokens = re.findall(r"[a-z0-9\u0900-\u097f\u0a80-\u0aff]+", cleaned)
+    return " ".join(tokens)
+
+
+def _get_blocked_duplicate_titles(cache: Dict[str, Any]) -> Set[str]:
+    """Collects already-uploaded and channel-saturated titles to prevent clone spam."""
+    blocked: Set[str] = set()
+    for entry in cache.get("uploaded_files", {}).values():
+        if isinstance(entry, dict) and entry.get("status") != "skipped_duplicate":
+            key = _normalize_title_key(entry.get("title", ""))
+            if key:
+                blocked.add(key)
+    try:
+        from growth.growth_engine import GrowthEngine
+        for title in GrowthEngine().get_saturated_titles():
+            key = _normalize_title_key(title)
+            if key:
+                blocked.add(key)
+    except Exception:
+        pass
+    return blocked
 
 
 def _extract_metadata_for_video(video_path: Path, run_dir: Path) -> Dict[str, Any]:
@@ -344,6 +371,7 @@ def upload_all_pending(watch_mode: bool = False, max_uploads: Optional[int] = No
 
     uploaded_results = []
     cache = _load_uploaded_cache()
+    blocked_titles = _get_blocked_duplicate_titles(cache)
 
     while True:
         pending = get_pending_videos()
@@ -369,6 +397,24 @@ def upload_all_pending(watch_mode: bool = False, max_uploads: Optional[int] = No
             tags = script.get("tags", ["masterclass", "dailygrowth", "mindset"] if is_standard else ["shorts", "dailygrowth"])
             cat_id = script.get("category_id", "27")
             pinned = script.get("pinned_comment")
+
+            title_key = _normalize_title_key(title)
+            if title_key and title_key in blocked_titles:
+                logger.info(f"⏭️ [Duplicate Guard] Skipping duplicate/saturated upload: '{title}' ({vpath.name})")
+                v_hash = _get_video_file_hash(vpath)
+                cache["uploaded_files"][v_hash] = {
+                    "path": str(vpath),
+                    "title": title,
+                    "status": "skipped_duplicate",
+                    "skipped_at": datetime.now(timezone.utc).isoformat(),
+                }
+                _save_uploaded_cache(cache)
+                if item.get("source_json") and item["source_json"].exists():
+                    try:
+                        item["source_json"].unlink()
+                    except Exception:
+                        pass
+                continue
 
             thumb_path = script.get("thumbnail_path")
             if not thumb_path:
@@ -436,6 +482,8 @@ def upload_all_pending(watch_mode: bool = False, max_uploads: Optional[int] = No
                 if res.get("video_id"):
                     cache["uploaded_ids"].append(res.get("video_id"))
                 _save_uploaded_cache(cache)
+                if title_key:
+                    blocked_titles.add(title_key)
 
                 # Send Native Desktop Notification
                 try:

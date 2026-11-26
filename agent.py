@@ -204,6 +204,7 @@ class YouTubeAgent:
                     headline=script.thumbnail_headline,
                     visual_prompt=script.thumbnail_visual_prompt,
                     output_path=thumbnail_path,
+                    accent_phrase=getattr(script, "thumbnail_accent", None),
                 )
             report(75, f"Custom thumbnail ready: {thumbnail_path.name}", 6)
 

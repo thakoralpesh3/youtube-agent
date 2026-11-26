@@ -270,6 +270,20 @@ class SocialManager:
         return count
 
 
+    def audit_and_evolve_growth(self, force: bool = True) -> Dict[str, Any]:
+        """Runs live Instagram/Facebook/local social analytics and evolves strategy."""
+        from growth.social_analytics import SocialGrowthEngine
+
+        engine = SocialGrowthEngine()
+        mem = engine.evolve_social_strategy(force=force)
+        logger.info(
+            f"📱 [Social Growth] Followers={mem.get('followers', 0)} | "
+            f"Reels avg={mem.get('reels_avg_views', 0)} views / {mem.get('reels_avg_likes', 0)} likes | "
+            f"Score={mem.get('social_growth_score', 0)}"
+        )
+        return mem
+
+
 def interactive_dashboard():
     """Interactive Control Dashboard for Social Media Stories AI."""
     mgr = SocialManager()
@@ -324,6 +338,7 @@ def interactive_dashboard():
 def main():
     parser = argparse.ArgumentParser(description="Social Media Stories AI Autonomous Manager")
     parser.add_argument("--status", action="store_true", help="Audit Instagram, Facebook and WhatsApp account health")
+    parser.add_argument("--growth", action="store_true", help="Analyze Instagram/Facebook engagement and evolve strategy")
     parser.add_argument("--publish-pending", action="store_true", help="Publish pending media from Story/ folder")
     parser.add_argument("--file", type=str, default=None, help="Publish a specific image or video file")
     parser.add_argument("--caption", type=str, default=None, help="Optional caption for upload")
@@ -335,6 +350,9 @@ def main():
 
     if args.status:
         mgr.audit_accounts()
+    elif args.growth:
+        mem = mgr.audit_and_evolve_growth(force=True)
+        print(json.dumps(mem, indent=2, ensure_ascii=False))
     elif args.sync:
         mgr.uploader.sync_from_user_firefox()
     elif args.file:

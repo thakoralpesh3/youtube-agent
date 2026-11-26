@@ -1,14 +1,16 @@
+import importlib.util
 import json
 import logging
 import random
+import time
 from pathlib import Path
-from typing import List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
 import config
-from growth.model_resolver import get_candidate_models
+from growth.model_resolver import call_gemini_resilient, get_candidate_models, mark_model_successful
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +337,11 @@ class LongVideoScript(BaseModel):
         description="YouTube category ID: 27=Education, 26=Howto & Style, 22=People & Blogs"
     )
     thumbnail_headline: str = Field(
-        description="Short, punchy 3-5 word high-contrast text to display boldly on the 16:9 thumbnail (e.g., 'THE DOPAMINE GLITCH', 'NEVER BE LAZY AGAIN', 'RULE #1 OF WILLPOWER')"
+        description="Short, punchy 2-3 word high-contrast text to display boldly on the 16:9 thumbnail (MUST NOT repeat words from the title, e.g., 'FIX THIS NOW', 'STOP WAITING', 'BRAIN TRAP')"
+    )
+    thumbnail_accent: Optional[str] = Field(
+        default=None,
+        description="Short 3-5 word curiosity kicker shown below the thumbnail headline specific to this topic (e.g., '3 BIOLOGY SHIFTS EXPLAINED', 'NO WILLPOWER NEEDED')"
     )
     thumbnail_visual_prompt: str = Field(
         description="Detailed prompt for 16:9 widescreen thumbnail artwork featuring intense emotional focus, high contrast, cinematic ARRI Alexa lighting, clean negative space for headline text"
@@ -350,6 +356,57 @@ class LongVideoScript(BaseModel):
 
 from growth.growth_engine import GrowthEngine
 from growth.network_guard import NetworkGuard
+
+_SKILL_MODULE_CACHE: Dict[str, Any] = {}
+
+
+def _load_skill_module(rel_path: str) -> Any:
+    """Loads a local skill scorer script once cleanly without altering sys.path."""
+    if rel_path in _SKILL_MODULE_CACHE:
+        return _SKILL_MODULE_CACHE[rel_path]
+    full_path = config.BASE_DIR / rel_path
+    if not full_path.exists():
+        _SKILL_MODULE_CACHE[rel_path] = None
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(f"skill_{full_path.stem}", str(full_path))
+        mod = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(mod)
+        _SKILL_MODULE_CACHE[rel_path] = mod
+        return mod
+    except Exception as e:
+        logger.debug(f"Could not load skill scorer {rel_path}: {e}")
+        _SKILL_MODULE_CACHE[rel_path] = None
+        return None
+
+
+def _normalize_title_tokens(title: str) -> set:
+    """Extracts meaningful lowercase title tokens excluding #Shorts boilerplate."""
+    cleaned = re.sub(r"#shorts\b", "", (title or "").lower())
+    return {w for w in re.findall(r"[a-z0-9\u0900-\u097f\u0a80-\u0aff]+", cleaned) if len(w) > 2}
+
+
+def is_repetitive_title(title: str, avoid_titles: List[str]) -> bool:
+    """Returns True if title matches or closely overlaps (>=80%) any previously uploaded/saturated title."""
+    cand_norm = re.sub(r"\s+", " ", re.sub(r"#shorts\b", "", (title or "").lower())).strip()
+    cand_toks = _normalize_title_tokens(title)
+    if not cand_norm:
+        return True
+    for old in avoid_titles:
+        old_clean = re.sub(r"\(Topic:.*", "", old, flags=re.IGNORECASE).strip()
+        old_norm = re.sub(r"\s+", " ", re.sub(r"#shorts\b", "", old_clean.lower())).strip()
+        if not old_norm:
+            continue
+        if cand_norm == old_norm:
+            return True
+        old_toks = _normalize_title_tokens(old_clean)
+        if cand_toks and old_toks and len(cand_toks) >= 3:
+            overlap = len(cand_toks & old_toks) / max(len(cand_toks | old_toks), 1)
+            if overlap >= 0.80:
+                return True
+    return False
+
 
 class ScriptGenerator:
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
@@ -426,14 +483,177 @@ class ScriptGenerator:
         logger.warning(f"⚠️ Could not auto-localize {lang} title across candidate models.")
         return title
 
+    def _get_avoid_titles(self) -> List[str]:
+        """Combines local topic history and channel-wide saturated titles from GrowthEngine."""
+        combined = list(get_topic_history())
+        try:
+            for t in self.growth_engine.get_saturated_titles():
+                if t and t not in combined:
+                    combined.append(t)
+        except Exception:
+            pass
+        return combined
+
+    def _audit_short_quality(self, lang_pkg: Any, avoid_titles: List[str]) -> Dict[str, Any]:
+        """Scores a Shorts script using repo skill linters (faceless_rules, hookscore, title)."""
+        issues: List[str] = []
+        title = getattr(lang_pkg, "title", "")
+        scenes = getattr(lang_pkg, "scenes", []) or []
+        first_hook = scenes[0].narration if scenes else ""
+
+        if is_repetitive_title(title, avoid_titles):
+            issues.append(f"Title '{title}' duplicates or closely overlaps a saturated channel title.")
+
+        faceless_mod = _load_skill_module("skills/faceless-shorts/faceless_rules.py")
+        fl_score = 100
+        if faceless_mod and hasattr(faceless_mod, "lint_faceless_script"):
+            res = faceless_mod.lint_faceless_script(lang_pkg.model_dump())
+            fl_score = res.get("score", 100)
+            for _, msg in res.get("issues", []):
+                issues.append(msg)
+
+        hook_verdict = 75
+        hook_mod = _load_skill_module("skills/yt-script/hookscore.py")
+        if hook_mod and hasattr(hook_mod, "score") and first_hook:
+            _, hook_verdict, _, _ = hook_mod.score(first_hook)
+            if hook_verdict < 62:
+                issues.append(f"Opening hook scored {hook_verdict}/100: needs direct 'you' address + concrete stakes/curiosity gap.")
+
+        title_score = 80
+        title_mod = _load_skill_module("skills/yt-package/title.py")
+        if title_mod and hasattr(title_mod, "check") and title:
+            tr = title_mod.check(re.sub(r"#shorts\b", "", title, flags=re.I).strip())
+            title_score = tr.get("score", 80)
+
+        return {
+            "faceless_score": fl_score,
+            "hook_score": hook_verdict,
+            "title_score": title_score,
+            "issues": issues,
+            "needs_polish": bool(issues and (fl_score < 78 or hook_verdict < 62 or any("duplicates" in i for i in issues))),
+        }
+
+    def _polish_trilingual_package(self, package: TrilingualShortsPackage, avoid_titles: List[str]) -> TrilingualShortsPackage:
+        """Runs 1 targeted quality-polish pass if pre-publish scoring flags weak hooks/pacing/duplicates."""
+        audit = self._audit_short_quality(package.english, avoid_titles)
+        logger.info(
+            f"📊 [Pre-Publish Quality Audit] Faceless={audit['faceless_score']}/100 | "
+            f"Hook={audit['hook_score']}/100 | Title={audit['title_score']}/100"
+        )
+        if not audit["needs_polish"]:
+            return package
+
+        if self.client:
+            polish_prompt = f"""
+Improve this Trilingual Shorts package to maximize WATCH TIME, RETENTION (>100% loop APV), VIEWS, and LIKES.
+Fix ONLY these diagnosed weaknesses across English, Hindi (Devanagari), and Gujarati:
+{chr(10).join('- ' + i for i in audit['issues'])}
+
+REQUIREMENTS:
+1. Plain, concrete, relatable Title under 52 chars ending with #Shorts (NO banned jargon like 'Glitch', NO duplicate titles).
+2. Scene 1 hook MUST directly address 'you' with immediate stakes in <=18 words.
+3. Break narration into 5 to 6 scenes, each 3.0 to 4.5 seconds estimated_duration_sec.
+4. End the final scene with a seamless loop connector phrase ('And that is why...', 'Remember this rule...', 'Because...').
+5. Preserve all family-safe standards and accurate Hindi/Gujarati localization.
+
+CURRENT PACKAGE JSON:
+{json.dumps(package.model_dump(), ensure_ascii=False)}
+"""
+            try:
+                res, used_model = call_gemini_resilient(
+                    client=self.client,
+                    contents=polish_prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=TrilingualShortsPackage,
+                        temperature=0.5,
+                    ),
+                    preferred_model=self.model_name,
+                    tier="argon",
+                    task_name="Pre-Publish Shorts Quality Polish",
+                )
+                improved = TrilingualShortsPackage(**json.loads(res.text))
+                improved.hindi.title = self._ensure_native_title(improved.hindi.title, "hi", improved.english.title)
+                improved.gujarati.title = self._ensure_native_title(improved.gujarati.title, "gu", improved.english.title)
+                validate_family_safe(f"{improved.topic} {improved.english.title} {improved.english.voiceover_script}")
+                logger.info(f"✨ [Quality Polish] Upgraded trilingual script via {used_model}")
+                return improved
+            except Exception as e:
+                logger.debug(f"Pre-publish polish skipped cleanly: {e}")
+
+        # Deterministic safety clamp so scene durations stay snappy
+        for lang_obj in (package.english, package.hindi, package.gujarati):
+            for sc in lang_obj.scenes:
+                if sc.estimated_duration_sec > 5.0:
+                    sc.estimated_duration_sec = 4.2
+        return package
+
+    def _polish_long_script(self, script: LongVideoScript, avoid_titles: List[str]) -> LongVideoScript:
+        """Audits 16:9 long video CTR packaging & opening 15s hook for watch hours."""
+        issues: List[str] = []
+        if is_repetitive_title(script.title, avoid_titles) or "masterclass guide" in script.title.lower():
+            issues.append(f"Title '{script.title}' sounds generic/repetitive. Rewrite with specific concrete number/curiosity (<58 chars).")
+
+        title_mod = _load_skill_module("skills/yt-package/title.py")
+        if title_mod and hasattr(title_mod, "check"):
+            tr = title_mod.check(script.title, script.thumbnail_headline)
+            for k, msg in tr.get("issues", []):
+                if k in ("duplicate", "thumb-length", "vague", "length"):
+                    issues.append(msg)
+
+        hook_mod = _load_skill_module("skills/yt-script/hookscore.py")
+        if hook_mod and hasattr(hook_mod, "score") and script.scenes:
+            _, hv, _, _ = hook_mod.score(script.scenes[0].narration[:220])
+            if hv < 60:
+                issues.append(f"First 15s hook scored {hv}/100: cut abstract intro and start with direct stakes for 'you'.")
+
+        if not issues or not self.client:
+            return script
+
+        polish_prompt = f"""
+Upgrade this 16:9 YouTube video script for higher CTR and Multi-Minute WATCH HOURS.
+Fix ONLY these packaging & retention issues:
+{chr(10).join('- ' + i for i in issues)}
+
+RULES:
+- Title: under 58 chars, concrete curiosity + number/stakes, NO 'Masterclass Guide', NO repetitive buzzwords.
+- thumbnail_headline: max 3 bold words using DIFFERENT words than the title.
+- thumbnail_accent: 3-4 concrete kicker words (never 'WATCH BEFORE IT IS TOO LATE').
+- Scene 1 narration: open cold with 'you' and undeniable personal stakes in the first sentence.
+- Each chapter should end with an open loop pulling the viewer into the next chapter.
+
+CURRENT SCRIPT JSON:
+{json.dumps(script.model_dump(), ensure_ascii=False)}
+"""
+        try:
+            res, used_model = call_gemini_resilient(
+                client=self.client,
+                contents=polish_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=LongVideoScript,
+                    temperature=0.5,
+                ),
+                preferred_model=self.model_name,
+                tier="argon",
+                task_name="Pre-Publish Long Video Polish",
+            )
+            improved = LongVideoScript(**json.loads(res.text))
+            validate_family_safe(f"{improved.topic} {improved.title} {improved.thumbnail_headline} " + " ".join(s.narration for s in improved.scenes))
+            logger.info(f"✨ [Quality Polish] Upgraded 16:9 watch-hours script via {used_model}")
+            return improved
+        except Exception as e:
+            logger.debug(f"Long script polish skipped cleanly: {e}")
+            return script
+
     def generate_trilingual_script(self, specific_topic: Optional[str] = None, callback: Optional[Callable] = None) -> TrilingualShortsPackage:
         """
         Generates a synchronized 3-language video package (English, Hindi, Gujarati)
         in a SINGLE prompt call, focused on stoic resilience, daily health, or financial discipline.
         """
         NetworkGuard.wait_for_network(callback=callback)
-        past_topics = get_topic_history()
-        growth_intelligence = self.growth_engine.get_growth_prompt_context()
+        avoid_titles = self._get_avoid_titles()
+        growth_intelligence = self.growth_engine.get_growth_prompt_context(content_format="shorts")
 
         # Target Pillars
         trilingual_pillars = [
@@ -445,11 +665,11 @@ class ScriptGenerator:
         chosen_pillar = specific_topic or random.choice(trilingual_pillars)
 
         history_instruction = ""
-        if past_topics:
-            formatted_history = "\n".join([f"- {t}" for t in past_topics[-15:]])
+        if avoid_titles:
+            formatted_history = "\n".join([f"- {t}" for t in avoid_titles[-20:]])
             history_instruction = f"""
 CRITICAL UNIQUENESS REQUIREMENT:
-Ensure this topic is 100% unique and does not repeat:
+Ensure this topic and title are 100% unique and NEVER repeat or paraphrase:
 {formatted_history}
 """
 
@@ -532,6 +752,10 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
                     # Validate strict all-ages compliance
                     validate_family_safe(f"{package.topic} {package.english.title} {package.english.voiceover_script} {package.visual_prompt}")
 
+                    # Pre-publish quality scoring & targeted optimization for higher watch time/views/likes
+                    mark_model_successful(model)
+                    package = self._polish_trilingual_package(package, avoid_titles)
+
                     # Record topic history
                     record_topic_history(package.topic, package.english.title)
                     return package
@@ -543,7 +767,7 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
                     break
 
         logger.warning("⚠️ All Gemini candidate models and API keys encountered rate limits (429/503). Activating autonomous high-retention Trilingual Shorts generator...")
-        package = self._create_fallback_trilingual_package(chosen_pillar or specific_topic or "stoic mental resilience")
+        package = self._create_fallback_trilingual_package(chosen_pillar or specific_topic or "stoic mental resilience", avoid_titles=avoid_titles)
         record_topic_history(package.topic, package.english.title)
         return package
 
@@ -551,27 +775,27 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
         # Pre-check network connectivity
         NetworkGuard.wait_for_network(callback=callback)
         niche = niche or config.DEFAULT_NICHE
-        past_topics = get_topic_history()
-        growth_intelligence = self.growth_engine.get_growth_prompt_context()
+        avoid_titles = self._get_avoid_titles()
+        growth_intelligence = self.growth_engine.get_growth_prompt_context(content_format="shorts")
         
         history_instruction = ""
-        if past_topics:
-            formatted_history = "\n".join([f"- {t}" for t in past_topics[-15:]])
+        if avoid_titles:
+            formatted_history = "\n".join([f"- {t}" for t in avoid_titles[-20:]])
             history_instruction = f"""
 CRITICAL UNIQUENESS REQUIREMENT:
 You MUST generate a completely unique and novel topic that has NEVER been covered before.
-DO NOT repeat or closely duplicate any of these recently generated videos:
+DO NOT repeat or closely duplicate any of these recently generated or saturated videos:
 {formatted_history}
 """
 
         # Intelligently select theme or topic
+        chosen_topic = specific_topic or random.choice(EXPANDED_GROWTH_THEMES)
         chosen_topic_prompt = ""
         if specific_topic:
             chosen_topic_prompt = f"Specific Topic Requested: {specific_topic}"
         else:
-            selected_theme = random.choice(EXPANDED_GROWTH_THEMES)
             chosen_topic_prompt = (
-                f"Theme Pillar: {selected_theme}\n"
+                f"Theme Pillar: {chosen_topic}\n"
                 "Create a fresh, mind-shifting, highly specific viral angle within this theme that immediately commands attention."
             )
 
@@ -644,7 +868,11 @@ Requirements:
                     # Validate strict all-ages compliance
                     full_text = f"{script.topic} {script.title} {script.description} " + " ".join(s.narration + " " + s.visual_prompt for s in script.scenes)
                     validate_family_safe(full_text)
-                    
+                    mark_model_successful(model)
+
+                    audit = self._audit_short_quality(script, avoid_titles)
+                    logger.info(f"📊 [Short Quality Audit] Faceless={audit['faceless_score']}/100 | Hook={audit['hook_score']}/100")
+
                     # Record to history for future uniqueness
                     record_topic_history(script.topic, script.title)
                     return script
@@ -657,7 +885,7 @@ Requirements:
                     break
 
         logger.warning(f"⚠️ All Gemini models and API keys encountered rate limits (429/503): {last_error}. Activating autonomous high-retention Shorts script generator...")
-        script = self._create_fallback_shorts_script(chosen_topic)
+        script = self._create_fallback_shorts_script(chosen_topic, avoid_titles=avoid_titles)
         record_topic_history(script.topic, script.title)
         return script
 
@@ -673,49 +901,43 @@ Requirements:
         and high-converting SEO metadata powered by Gemini 4 Argon deep reasoning.
         """
         NetworkGuard.wait_for_network(callback=callback)
-        past_topics = get_topic_history()
-        growth_intelligence = self.growth_engine.get_growth_prompt_context()
+        avoid_titles = self._get_avoid_titles()
+        growth_intelligence = self.growth_engine.get_growth_prompt_context(content_format="long")
 
         chosen_topic = topic or seed_topic or random.choice(EXPANDED_GROWTH_THEMES)
 
         history_instruction = ""
-        if past_topics and not topic:
-            formatted_history = "\n".join([f"- {t}" for t in past_topics[-15:]])
+        if avoid_titles and not topic:
+            formatted_history = "\n".join([f"- {t}" for t in avoid_titles[-20:]])
             history_instruction = f"""
 CRITICAL UNIQUENESS REQUIREMENT:
-Ensure this topic is 100% unique and fresh. Do not duplicate recent concepts:
+Ensure this topic and title are 100% unique and fresh. NEVER repeat generic 'Masterclass Guide' titles or any of these:
 {formatted_history}
 """
 
         system_instruction = (
-            "You are Gemini 4 Argon, Google's flagship reasoning engine, acting as a masterclass YouTube producer.\n"
-            "Your task is to generate a complete, viral-ready STANDARD YouTube landscape video script (16:9 widescreen, 2 to 4 minutes total duration).\n"
+            "You are Gemini 4 Argon, Google's flagship reasoning engine, acting as an elite YouTube retention & packaging producer.\n"
+            "Your task is to generate a complete, high-CTR STANDARD YouTube landscape video script (16:9 widescreen, 2 to 4 minutes total duration) engineered to maximize WATCH HOURS, CTR, and LIKES.\n"
             "Focus on: High-Performance Growth Mindset, Stoic Philosophy, Health & Fitness Science, Mental Resilience, and Peak Daily Discipline.\n"
-            "The tone must be clean, authoritative, intellectually deep, grounded in real physiology/psychology, and suitable for all ages.\n\n"
+            "The tone must be clean, authoritative, grounded in real physiology/psychology, and suitable for all ages.\n\n"
             f"{config.SAFETY_GUARDRAILS}\n\n"
             "STRICT AGE-APPROPRIATE & ZERO-TOLERANCE POLICY (NO 18+, NO NUDE, NO PORN, NO SEXY CONTENT):\n"
             "- All content (title, description, timestamps, narration, thumbnail prompt, and scene prompts) MUST be 100% clean and suitable for all ages (G/PG rating).\n"
             "- Strictly NO adult references, nudity, sexy/provocative clothing, revealing cleavage, bare chest, shirtless figures, profanity, vulgarity, violence, weapons, alcohol, or illicit topics.\n\n"
-            "GEMINI 4 ARGON DEEP REASONING & CHAPTER NARRATIVE STRUCTURE:\n"
-            "Construct a coherent, high-retention 6 to 10 scene progression:\n"
-            "1. Scene 1 (The Hook & Provocative Premise): 00:00 - Introduction. Arrest viewer attention with an inescapable cognitive paradox or counter-intuitive reality.\n"
-            "2. Scene 2 (The Evolutionary / Neurological Flaw): Unmask the biological trap or common misconception that sabotages most people.\n"
-            "3. Scene 3 (The Cost of Inaction): Illustrate the compounding negative trajectory of continuing down the default path.\n"
-            "4. Scene 4 (The Sovereign Principle / Rule #1): Reveal the foundational paradigm shift or scientific law.\n"
-            "5. Scene 5 & 6 (The Tactical Step-by-Step Protocol): Concrete, daily actionable micro-habits that viewers can execute immediately.\n"
-            "6. Scene 7+ (The Compounding Payoff & Lifelong Mastery): Deliver the inspiring climax, synthesis, and an empowering call to action.\n\n"
-            "METADATA & THUMBNAIL REQUIREMENTS:\n"
-            "- Title: High-converting, curiosity-driven YouTube video title under 80 characters (NO #Shorts tag).\n"
-            "- Description: Structured YouTube long-form description with:\n"
-            "  * 2-3 sentence overview of the video's core value.\n"
-            "  * Formatted timestamps and chapter breakdown (e.g. '00:00 - Introduction\\n00:30 - The Invisible Trap\\n01:15 - Rule #1 of Discipline\\n...').\n"
-            "  * Key Takeaways bullet points.\n"
-            "  * Call to action to subscribe and comment.\n"
-            "  * 5-8 relevant hashtags (#SelfImprovement #Mindset #Discipline #Psychology #Education).\n"
-            "- Tags: 15-20 high-value YouTube search keyword tags.\n"
-            "- Thumbnail_Headline: 3-5 bold, punchy words for the 16:9 thumbnail text overlay (e.g. 'THE DOPAMINE TRAP', 'RULE #1 OF WILLPOWER', 'STOP WASTING YEARS').\n"
-            "- Thumbnail_Visual_Prompt: Detailed prompt for a 16:9 cinematic landscape thumbnail visual with clear negative space for text overlay.\n"
-            "- Scenes: 6 to 10 scenes, each with ~40-70 words of spoken narration, and a photorealistic 16:9 widescreen cinematic visual prompt shot on ARRI Alexa LF, 35mm anamorphic prime lens, 16:9 horizontal framing, natural cinematic lighting, authentic skin textures and material physics, strictly family-friendly attire, NO text drawn inside the image itself."
+            "WATCH-HOURS & CHAPTER RETENTION ARCHITECTURE:\n"
+            "Construct a coherent, high-retention 6 to 9 scene progression:\n"
+            "1. Scene 1 (Cold-Open Hook 00:00): Start in seconds 0-10 addressing 'you' directly with undeniable stakes or a sharp cognitive paradox (NEVER start with 'Most people believe' or 'In this video').\n"
+            "2. Scene 2 (The Hidden Biological Trap): Unmask what silently drains energy/focus, ending with an open loop into the next chapter.\n"
+            "3. Scene 3 (The Real Cost): Concrete cost of staying stuck, keeping viewers hooked.\n"
+            "4. Scene 4 (The Core Shift / Rule #1): Deliver the surprising scientific mechanism.\n"
+            "5. Scene 5 & 6 (Step-by-Step Protocol): 2-3 immediate actions viewers can apply today.\n"
+            "6. Scene 7+ (Payoff & Final Question): Synthesize + invite comments to boost algorithm signals.\n\n"
+            "PACKAGING & THUMBNAIL RULES (TITLE + THUMBNAIL = 1 UNIT):\n"
+            "- Title: Under 58 characters, concrete curiosity/number/stakes, NO generic 'Masterclass Guide' or vague 'Definitive' fluff (NO #Shorts tag).\n"
+            "- Thumbnail_Headline: MAX 3 bold words using COMPLETELY DIFFERENT words from the title (e.g. Title='3 Habits Destroying Your Focus' -> Thumb='FIX THIS NOW').\n"
+            "- Thumbnail_Accent: Short 3-4 word secondary kicker below headline specific to this topic (e.g. 'SCIENCE EXPLAINED', 'NO WILLPOWER NEEDED').\n"
+            "- Thumbnail_Visual_Prompt: Detailed prompt for a 16:9 cinematic landscape thumbnail visual with clear dark negative space on the left third for text overlay.\n"
+            "- Scenes: 6 to 9 scenes, each with ~40-65 words of spoken narration, and a photorealistic 16:9 widescreen cinematic visual prompt shot on ARRI Alexa LF, 35mm anamorphic prime lens, 16:9 horizontal framing, natural cinematic lighting, strictly family-friendly attire, NO text inside images."
         )
 
         prompt = f"""
@@ -752,6 +974,8 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
                     # Validate strict all-ages compliance
                     full_text = f"{script.topic} {script.title} {script.description} {script.thumbnail_headline} " + " ".join(s.narration + " " + s.visual_prompt for s in script.scenes)
                     validate_family_safe(full_text)
+                    mark_model_successful(model)
+                    script = self._polish_long_script(script, avoid_titles)
 
                     record_topic_history(script.topic, script.title)
                     return script
@@ -764,284 +988,427 @@ Enforce strict all-ages / family-friendly standards (zero 18+ content).
                     break
 
         logger.warning(f"⚠️ All Gemini models and API keys encountered rate limits or errors: {last_error}. Activating autonomous high-quality standard video script generator...")
-        script = self._create_fallback_long_video_script(chosen_topic)
+        script = self._create_fallback_long_video_script(chosen_topic, avoid_titles=avoid_titles)
         record_topic_history(script.topic, script.title)
         return script
 
-    def _create_fallback_long_video_script(self, topic: str) -> LongVideoScript:
+    def _create_fallback_long_video_script(self, topic: str, avoid_titles: Optional[List[str]] = None) -> LongVideoScript:
         """
-        Constructs an elite, 100% all-ages, family-safe LongVideoScript when Gemini API
-        quota (429 RESOURCE_EXHAUSTED) is temporarily exceeded.
+        Constructs a unique, high-CTR, family-safe LongVideoScript when Gemini API quota
+        is temporarily exceeded, varying title & framing to avoid duplicate uploads.
         """
-        clean_topic = topic.strip().title() if topic else "Stoic Resilience & Unshakeable Focus"
-        title = f"{clean_topic}: The Definitive Masterclass Guide"
-        headline = "UNBREAKABLE MIND"
-        if "focus" in clean_topic.lower() or "dopamine" in clean_topic.lower():
-            headline = "PEAK FOCUS PROTOCOL"
-        elif "habit" in clean_topic.lower() or "discipline" in clean_topic.lower():
-            headline = "RULE #1 DISCIPLINE"
+        avoid = avoid_titles or self._get_avoid_titles()
+        raw_clean = re.sub(r"[^a-zA-Z0-9\s,&:-]", "", (topic or "Unshakeable Daily Focus")).strip()
+        short_focus = " ".join(raw_clean.split()[:5]).title() or "Deep Focus"
 
-        description = f"""{title}
+        title_candidates = [
+            (f"Why Your Brain Loses {short_focus} (And 3 Fixes)", "STOP LOSING TIME", "3 BIOLOGY SHIFTS"),
+            (f"The 3 Habits Silently Killing Your {short_focus}", "SILENT DRAIN", "FIX IT IN 7 DAYS"),
+            (f"How High Performers Build {short_focus} Daily", "BRAIN RESET", "ZERO EXCUSES"),
+            (f"5 Minutes to Rewire {short_focus} Forever", "5 MIN RULE", "PROVEN HABIT LOOP"),
+            (f"Why Willpower Fails on {short_focus} - Science", "NOT LAZINESS", "DOPAMINE TRUTH"),
+        ]
+        chosen_title, headline, accent = title_candidates[0]
+        for cand_title, cand_hl, cand_acc in title_candidates:
+            if not is_repetitive_title(cand_title, avoid):
+                chosen_title, headline, accent = cand_title, cand_hl, cand_acc
+                break
+        if is_repetitive_title(chosen_title, avoid):
+            chosen_title = f"{short_focus}: 3 Habits That Work ({time.strftime('%b %d')})"[:58]
 
-Master your habits, focus, and mindset with this comprehensive deep-dive. We explore the cognitive science, biological patterns, and practical daily protocols required to build unshakeable discipline.
+        description = f"""{chosen_title}
+
+You are not lazy - your environment drains your focus before work even begins. Here is the exact 3-step science breakdown for mastering {short_focus} and keeping steady clarity all day.
 
 CHAPTER TIMESTAMPS:
-00:00 - Introduction & The Core Premise
-00:25 - The Neurological Trap of Distraction
-00:55 - The Sovereign Principle of Focus
-01:30 - The 3-Step Daily Execution Protocol
-02:10 - Lifelong Compounding & Final Synthesis
+00:00 - Why You Lose Energy Before Noon
+00:25 - The Hidden Dopamine Drain
+00:55 - Why Forcing Willpower Backfires
+01:30 - The 3-Step Daily Protocol
+02:10 - How Consistency Compounds in 30 Days
 
-KEY TAKEAWAYS:
-• Willpower is a biological resource that must be engineered through friction control.
-• Clarity precedes action: reduce decision fatigue to execute without resistance.
-• Consistency compounds exponentially over 90-day cycles.
+Subscribe to Daily Growth for practical breakdowns in focus, health, and stoic discipline!
 
-Subscribe to Daily Growth for daily masterclasses in self-improvement and high performance!
-
-#SelfImprovement #Mindset #Discipline #Productivity #Psychology #Stoicism #Education"""
+#SelfImprovement #Focus #Discipline #Psychology #DailyGrowth #Habits"""
 
         tags = [
-            "self improvement", "productivity", "focus", "discipline",
-            "stoicism", "daily growth", "motivation", "habits",
-            "psychology", "mental resilience", "mindset mastery",
-            "high performance", "deep work", "success habits"
+            "self improvement", "focus habits", "discipline", "dopamine detox",
+            "stoic mindset", "daily growth", "mental clarity", "productivity science",
+            "morning routine", "high performance", "how to focus",
         ]
 
         scenes = [
             LongVideoScene(
                 scene_number=1,
-                chapter_title="00:00 - Introduction & The Core Premise",
+                chapter_title="00:00 - Why You Lose Energy Before Noon",
                 narration=(
-                    f"Most people believe success is a question of talent or luck. "
-                    f"In reality, the secret lies in one foundational truth: your attention is your greatest currency. "
-                    f"When you master {clean_topic}, external chaos loses its power over your direction."
+                    f"If you wake up already behind and lose your focus by afternoon, it is not a lack of willpower. "
+                    f"Every micro-distraction steals cognitive bandwidth before you ever start your real work on {short_focus}. "
+                    f"Stay with me for two minutes, because fixing step one changes your entire day."
                 ),
                 visual_prompt=(
-                    "Cinematic 16:9 widescreen shot of a modern stoic mentor standing in a minimalist architecture library, "
-                    "looking directly forward with focused clarity, warm afternoon sunlight casting dramatic soft shadows, "
-                    "ARRI Alexa LF, 35mm anamorphic prime lens, T1.5 shallow depth of field, strictly fully clothed in tailored jacket, "
-                    "photorealistic documentary cinematography, 8k resolution, no text"
+                    "Cinematic 16:9 widescreen shot of a focused mentor in dark wool coat at a clean sunlit desk, "
+                    "intense eye contact directly toward viewer, warm dramatic morning shadows, ARRI Alexa LF, 35mm anamorphic lens, 8k, no text"
                 ),
                 estimated_duration_sec=16.0,
             ),
             LongVideoScene(
                 scene_number=2,
-                chapter_title="00:25 - The Neurological Trap",
+                chapter_title="00:25 - The Hidden Dopamine Drain",
                 narration=(
-                    "The modern world is engineered to fragment your cognitive focus. "
-                    "Every notification triggers a micro-release of dopamine, conditioning your brain to crave constant novelty. "
-                    "This creates a state of perpetual shallow reaction rather than deliberate mastery."
+                    "Here is the trap 90% of people miss: checking fast feeds or constant alerts floods your brain with cheap stimulation. "
+                    "Once your baseline spikes early, deep work feels physically painful. "
+                    "Your brain is not broken - it is simply chasing the easiest stimulus in the room."
                 ),
                 visual_prompt=(
-                    "Cinematic 16:9 landscape view of an ancient marble sundial on a stone terrace overlooking misty mountains, "
-                    "dramatic moody atmospheric fog, golden hour rim lighting, photorealistic material textures, "
-                    "ARRI Alexa LF, 35mm lens, documentary realism, 8k, no text"
+                    "Cinematic 16:9 landscape view of dramatic storm clouds parting over calm pine mountains at dawn, "
+                    "sharp crisp shadows, golden hour rim lighting, ARRI Alexa LF, 35mm lens, documentary realism, 8k, no text"
                 ),
-                estimated_duration_sec=18.0,
+                estimated_duration_sec=17.0,
             ),
             LongVideoScene(
                 scene_number=3,
-                chapter_title="00:55 - The Sovereign Principle",
+                chapter_title="00:55 - Why Willpower Backfires",
                 narration=(
-                    "The ancient Stoics discovered a timeless law: you cannot control external events, "
-                    "but you have absolute sovereignty over your own response. "
-                    "By detaching from immediate impulse and grounding yourself in deliberate daily execution, "
-                    "you transform pressure into your greatest competitive advantage."
+                    "Trying to brute-force discipline against a noisy environment burns willpower in under two hours. "
+                    "Even the ancient Stoics knew calm control comes from designing friction away from bad habits, not relying on mood."
                 ),
                 visual_prompt=(
-                    "Cinematic 16:9 widescreen composition, an ancient scholar walking along a majestic classical stone colonnade, "
-                    "shafts of golden morning sunlight piercing through pillars, dramatic high contrast, "
-                    "ARRI Alexa LF, 35mm anamorphic prime lens, cinematic realism, strictly clothed, 8k, no text"
+                    "Cinematic 16:9 widescreen shot of ancient stone columns bathed in crisp golden morning sunbeams, "
+                    "quiet classical strength and architectural symmetry, ARRI Alexa LF, 35mm anamorphic lens, 8k, no text"
                 ),
-                estimated_duration_sec=20.0,
+                estimated_duration_sec=16.0,
             ),
             LongVideoScene(
                 scene_number=4,
-                chapter_title="01:30 - The Daily Protocol",
+                chapter_title="01:30 - The 3-Step Daily Protocol",
                 narration=(
-                    "Begin each day with sixty minutes of non-negotiable deep focus before checking any screen. "
-                    "Protect your peak cognitive window fiercely. "
-                    "Small, focused actions repeated with relentless consistency produce outcomes that look like magic to observers."
+                    "First: delay all screens for 30 minutes after waking and hydrate with sunlight in your eyes. "
+                    "Second: reduce friction so your most important task starts in 20 seconds flat. "
+                    "Third: protect one 60-minute deep block daily before replying to anyone else's agenda."
                 ),
                 visual_prompt=(
-                    "Cinematic 16:9 widescreen still of a beautifully organized mahogany desk with a fountain pen and notebook, "
-                    "warm glowing desk lamp, steam rising gently from a ceramic mug, serene early morning ambiance, "
-                    "ARRI Alexa LF, 35mm anamorphic lens, 8k resolution, photorealistic, no text"
+                    "Cinematic 16:9 widescreen shot of a neat walnut study desk with an open journal, brass pen, and morning sunlight, "
+                    "calm purposeful atmosphere, ARRI Alexa LF, 35mm anamorphic prime lens, 8k, no text"
                 ),
                 estimated_duration_sec=18.0,
             ),
             LongVideoScene(
                 scene_number=5,
-                chapter_title="02:10 - Lifelong Compounding",
+                chapter_title="02:10 - 30-Day Compounding",
                 narration=(
-                    f"Mastery is not a finish line; it is a daily standard. "
-                    f"Commit to the process of {clean_topic} today. "
-                    f"Subscribe to Daily Growth, take control of your time, and build a life of quiet excellence."
+                    f"Small daily wins in {short_focus} seem invisible on day one, then undeniable by day thirty. "
+                    "Tell me in the comments which of those three steps you are locking in first today, "
+                    "and subscribe for tomorrow's breakdown."
                 ),
                 visual_prompt=(
-                    "Cinematic 16:9 wide vista of a solitary figure standing atop a mountain ridge at sunrise, "
-                    "golden light spreading across endless green valleys, inspiring horizon, "
-                    "ARRI Alexa LF, 35mm anamorphic lens, epic cinematic documentary realism, 8k, strictly clothed, no text"
+                    "Cinematic 16:9 wide shot of a hiker in modest jacket standing on a crisp granite ridge overlooking glowing sunrise valley, "
+                    "epic hopeful horizon, ARRI Alexa LF, 35mm lens, 8k, no text"
                 ),
-                estimated_duration_sec=16.0,
+                estimated_duration_sec=15.0,
             ),
         ]
 
         return LongVideoScript(
-            topic=clean_topic,
-            title=title,
+            topic=short_focus,
+            title=chosen_title[:80],
             description=description,
             tags=tags,
             category_id=config.DEFAULT_CATEGORY_ID,
             thumbnail_headline=headline,
+            thumbnail_accent=accent,
             thumbnail_visual_prompt=(
-                f"High-contrast 16:9 landscape thumbnail artwork, powerful portrait of a stoic thinker in intense focus, "
-                f"dramatic golden rim lighting against deep dark background, clean negative space on the left third for headline text, "
-                f"ARRI Alexa LF, 35mm anamorphic lens, cinematic realism, 8k, strictly clothed, no text"
+                "High-contrast 16:9 landscape thumbnail artwork of a determined mentor silhouetted with intense golden rim lighting "
+                "on right half, deep dark clean negative space on left third for bold text, ARRI Alexa LF, 35mm lens, 8k, no text"
             ),
             scenes=scenes,
-            pinned_comment=f"What is the single biggest habit you are working to master this week? Share your thoughts below!",
+            pinned_comment=f"Which of the 3 steps for {short_focus} will you try tomorrow morning? Comment 1, 2, or 3 below!",
         )
 
     def _create_fallback_trilingual_package(self, topic: str) -> TrilingualShortsPackage:
         """
-        Constructs an authentic, high-converting TrilingualShortsPackage across English,
-        Hindi (genuine Devanagari script), and Gujarati (genuine Gujarati script)
-        when Gemini API daily free-tier quota (429 RESOURCE_EXHAUSTED) is reached.
-        Guarantees that daily uploads NEVER fail even under API downtime.
+        Constructs a fresh, fast-paced, non-duplicate TrilingualShortsPackage
+        across English, Hindi (Devanagari), and Gujarati when Gemini API quota
+        is exhausted, selecting from a rotating multi-topic pool and filtering
+        out saturated/recently uploaded titles.
         """
+        avoid_titles = self._get_avoid_titles()
+        presets = [
+            {
+                "keywords": ["sleep", "morning", "health", "energy", "vitality"],
+                "theme_cat": "health_habits",
+                "pillar": "Practical Daily Health Habits",
+                "en_title": "Why 90% Wake Up Exhausted After 8 Hours #Shorts",
+                "hi_title": "8 घंटे सोने के बाद भी थकान क्यों रहती है #Shorts",
+                "gu_title": "8 કલાક ઊંઘ્યા પછી પણ થાક કેમ લાગે છે #Shorts",
+                "en_s": [
+                    "You slept eight full hours, yet your brain feels completely foggy.",
+                    "A hidden 90-minute sleep cycle alarm just went off too late.",
+                    "Waking mid-deep-sleep floods your prefrontal cortex with sleep inertia.",
+                    "Set a 45-minute pre-bed screen curfew and cool room temperature tonight.",
+                    "Follow that one clock tonight, and that is the exact reason...",
+                ],
+                "hi_s": [
+                    "आठ घंटे सोने के बाद भी आपका दिमाग भारी और थका हुआ क्यों लगता है?",
+                    "क्योंकि आप अपनी 90 मिनट की गहरी नींद के बीच में उठ रहे हैं।",
+                    "अधूरी साइकिल में जागने से पूरा दिन आलस्य और थकान हावी रहती है।",
+                    "आज रात सोने से 45 मिनट पहले फोन बंद करें और कमरा ठंडा रखें।",
+                    "सही समय पर उठने की यह घड़ी समझ ली, तो यही असली कारण है कि...",
+                ],
+                "gu_s": [
+                    "આઠ કલાકની પૂરી ઊંઘ પછી પણ સવારે મગજ ભારે કેમ લાગે છે?",
+                    "કારણ કે તમે તમારી 90 મિનિટની ઊંડી ઊંઘની વચ્ચે જાગી જાઓ છો.",
+                    "અધૂરી સાયકલમાં ઉઠવાથી આખો દિવસ સુસ્તી અને થાક લાગ્યા કરે છે.",
+                    "આજે રાત્રે સૂવાના 45 મિનિટ પહેલાં ફોન બંધ કરી રૂમ ઠંડો રાખો.",
+                    "જો આ ઊંઘનું ચક્ર સમજી લેશો, તો એ જ સાચું કારણ છે કે...",
+                ],
+                "poll_q": "What ruins your morning energy most often?",
+                "poll_opts": ["Late phone scrolling", "Irregular wake time", "Heavy late dinner", "Waking mid-cycle"],
+            },
+            {
+                "keywords": ["money", "financ", "wealth", "rich", "spend"],
+                "theme_cat": "financial_discipline",
+                "pillar": "Realistic Financial Discipline",
+                "en_title": "The 72-Hour Rule Quiet Millionaires Swear By #Shorts",
+                "hi_title": "पैसा बचाने का 72 घंटे वाला गुप्त नियम #Shorts",
+                "gu_title": "પૈસા બચાવવાનો 72 કલાકનો અનોખો નિયમ #Shorts",
+                "en_s": [
+                    "Most paychecks vanish on things you barely remember three days later.",
+                    "Impulse buying hijacks dopamine right before your logic wakes up.",
+                    "Wait 72 hours before pressing buy on any want over fifty dollars.",
+                    "Nine times out of ten, the urge drops to zero while your savings grow.",
+                    "Try this quiet pause for thirty days, and notice how fast...",
+                ],
+                "hi_s": [
+                    "ज्यादातर कमाई ऐसी चीजों में चली जाती है जिन्हें आप तीन दिन बाद भूल जाते हैं।",
+                    "जल्दबाजी की खरीदारी दिमाग को भ्रम में डालकर जेब खाली कर देती है।",
+                    "किसी भी गैर-जरूरी खरीद से पहले पूरे 72 घंटे का इंतजार करना शुरू करें।",
+                    "नब्बे प्रतिशत मामलों में इच्छा खत्म हो जाती है और बचत बढ़ने लगती है।",
+                    "तीस दिन इस शांत नियम को आजमाएं, फिर खुद देखें कि कैसे...",
+                ],
+                "gu_s": [
+                    "મોટાભાગની કમાણી એવી વસ્તુઓમાં વપરાઈ જાય છે જે ત્રણ દિવસમાં ભૂલાઈ જાય છે.",
+                    "ઉતાવળી ખરીદી મગજના આવેગનો ફાયદો ઉઠાવી ખિસ્સું ખાલી કરી દે છે.",
+                    "કોઈ પણ બિનજરૂરી વસ્તુ ખરીદતા પહેલા પૂરા 72 કલાક રાહ જોવાની ટેવ પાડો.",
+                    "નવ્વાણું ટકા કિસ્સામાં ખરીદવાની ઈચ્છા ઓગળી જશે અને બચત વધશે.",
+                    "ત્રીસ દિવસ આ શાંત નિયમ અપનાવો, અને જુઓ કે કેવી રીતે...",
+                ],
+                "poll_q": "Which money habit helps you save the most?",
+                "poll_opts": ["72-hour wait rule", "Auto-transfer on payday", "Cash-only weekends", "Tracking subscriptions"],
+            },
+            {
+                "keywords": ["focus", "dopamine", "phone", "procrastin", "productiv"],
+                "theme_cat": "focus_psychology",
+                "pillar": "Deep Focus & Attention Mastery",
+                "en_title": "Why 5 Minutes Of Boredom Fixes Broken Focus #Shorts",
+                "hi_title": "5 मिनट बोर होने से दिमाग तेज कैसे होता है #Shorts",
+                "gu_title": "5 મિનિટ શાંત બેસવાથી ફોકસ કેમ બમણું થાય છે #Shorts",
+                "en_s": [
+                    "You stare at work for an hour yet finish almost nothing meaningful.",
+                    "Constant micro-scrolls keep your brain starved for cheap novelty.",
+                    "Sit in silence for five plain minutes before opening your hardest task.",
+                    "When stimulation drops, deep work suddenly feels effortless and clear.",
+                    "Give your mind five empty minutes tomorrow morning, and see why...",
+                ],
+                "hi_s": [
+                    "आप एक घंटे काम के सामने बैठते हैं, फिर भी काम पूरा क्यों नहीं होता?",
+                    "बार-बार फोन देखने की आदत दिमाग की गहराई से सोचने की क्षमता घटाती है।",
+                    "सबसे कठिन काम शुरू करने से पहले बस 5 मिनट बिना फोन चुपचाप बैठें।",
+                    "जैसे ही शोर शांत होता है, दिमाग अपने आप एकाग्र होकर काम में लग जाता है।",
+                    "कल सुबह अपने दिमाग को पांच शांत मिनट देकर देखें, और समझें कि...",
+                ],
+                "gu_s": [
+                    "એક કલાક કામ સામે બેઠા પછી પણ અગત્યનું કામ કેમ પૂરું નથી થતું?",
+                    "વારંવાર ફોન ચેક કરવાની ટેવ મગજની એકાગ્રતાને નબળી પાડી દે છે.",
+                    "સૌથી અઘરું કામ શરૂ કરતા પહેલા માત્ર 5 મિનિટ ફોન વિના શાંત બેસો.",
+                    "જ્યારે બાહ્ય શોર બંધ થાય છે, ત્યારે ઊંડું ધ્યાન આપમેળે લાગી જાય છે.",
+                    "કાલે સવારે મગજને ફક્ત પાંચ ખાલી મિનિટ આપો, અને જુઓ કે...",
+                ],
+                "poll_q": "What kills your deep work streak fastest?",
+                "poll_opts": ["Phone notifications", "Tab switching", "Unclear first step", "Mental fatigue"],
+            },
+            {
+                "keywords": ["stoic", "calm", "anger", "mind", "stress", "resilien"],
+                "theme_cat": "stoic_resilience",
+                "pillar": "Stoic Mental Resilience",
+                "en_title": "The 3-Second Stoic Trick That Disarms Any Insult #Shorts",
+                "hi_title": "गुस्सा और अपमान शांत करने की 3-सेकंड की ट्रिक #Shorts",
+                "gu_title": "ગુસ્સો અને અપમાન શાંત કરવાની 3-સેकન્ડની રીત #Shorts",
+                "en_s": [
+                    "One rude comment can hijack your mood for the entire afternoon.",
+                    "Most people react instantly because ego hates leaving a word unanswered.",
+                    "Look calmly at the person for three silent seconds before saying a word.",
+                    "That pause shifts tension back onto them while your composure stays untouched.",
+                    "Use silence before speaking next time, and that is exactly why...",
+                ],
+                "hi_s": [
+                    "किसी की एक कड़वी बात आपका पूरा दिन बर्बाद कर सकती है।",
+                    "अहंकार हर बात का तुरंत जवाब चाहता है और हम जाल में फंस जाते हैं।",
+                    "जवाब देने से पहले बस तीन सेकंड शांत रहकर सामने वाले को देखें।",
+                    "यह छोटा ठहराव सामने वाले की बेचैनी बढ़ाता है और आपकी शांति बचाता है।",
+                    "अगली बार बोलने से पहले तीन सेकंड रुकें, और यही कारण है कि...",
+                ],
+                "gu_s": [
+                    "કોઈની એક કડવી વાત તમારો આખો દિવસ બગાડી શકે છે.",
+                    "આપણો અહંકાર તરત જવાબ આપવા દોડે છે અને આપણે જાળમાં ફસાઈએ છીએ.",
+                    "જવાબ આપતા પહેલા માત્ર ત્રણ સેકન્ડ શાંત રહીને સામે જુઓ.",
+                    "આ નાનો વિરામ તમારી શાંતિ જાળવી રાખે છે અને પરિસ્થિતિ સંભાળી લે છે.",
+                    "આવતી વખતે બોલતા પહેલા ત્રણ સેકન્ડ થોભી જુઓ, એટલે સમજાશે કે...",
+                ],
+                "poll_q": "How do you stay calm during unfair criticism?",
+                "poll_opts": ["Pause 3 seconds", "Ask a calm question", "Walk away briefly", "Reframe objectively"],
+            },
+            {
+                "keywords": ["respect", "charisma", "speak", "social", "confiden"],
+                "theme_cat": "communication_charisma",
+                "pillar": "Respect & Communication Mastery",
+                "en_title": "One Vocal Shift That Commands Instant Respect #Shorts",
+                "hi_title": "बोलने का यह छोटा बदलाव तुरंत सम्मान दिलाता है #Shorts",
+                "gu_title": "બોલવાનો આ નાનો ફેરફાર તરત માન અપાવે છે #Shorts",
+                "en_s": [
+                    "Talking faster makes smart ideas sound nervous and easily ignored.",
+                    "High-status communicators let the end of each sentence land downward cleanly.",
+                    "Drop upward inflection on statements and hold eye contact half a beat longer.",
+                    "People instinctively trust voices that sound unhurried under pressure.",
+                    "Slow your last three words today, and remember why...",
+                ],
+                "hi_s": [
+                    "तेज गति से बोलने पर सही बात भी घबराई हुई और कमजोर लगती है।",
+                    "प्रभावशाली लोग हर वाक्य के अंत में आवाज को स्थिर और स्पष्ट रखते हैं।",
+                    "बात खत्म करते समय जल्दबाजी छोड़ें और एक सेकंड शांत नजर मिलाएं।",
+                    "इंसानी दिमाग हमेशा शांत और सधे हुए स्वर पर तुरंत भरोसा करता है।",
+                    "आज अपने वाक्य के आखिरी तीन शब्द धीरे बोलें, और याद रखें कि...",
+                ],
+                "gu_s": [
+                    "ઝડપથી બોલવાથી સાચી વાત પણ ગભરાયેલી અને નબળી લાગે છે.",
+                    "પ્રભાવશાળી લોકો દરેક વાક્યના અંતે અવાજને સ્થિર અને સ્પષ્ટ રાખે છે.",
+                    "વાત પૂરી કરતી વખતે ઉતાવળ છોડો અને એક ક્ષણ શાંત નજર મિલાવો.",
+                    "દરેક વ્યક્તિ શાંત અને ધીરજવાળા અવાજ પર તરત જ વિશ્વાસ મૂકે છે.",
+                    "આજે તમારા વાક્યના છેલ્લા ત્રણ શબ્દો ધીમે બોલો, અને જુઓ કે...",
+                ],
+                "poll_q": "Which communication skill do you want to master next?",
+                "poll_opts": ["Slower vocal pacing", "Holding eye contact", "Saying no politely", "Storytelling clarity"],
+            },
+            {
+                "keywords": ["habit", "discipline", "gym", "consisten", "routine"],
+                "theme_cat": "habit_architecture",
+                "pillar": "Habit & Identity Architecture",
+                "en_title": "The Two-Day Rule That Never Breaks A Habit Streak #Shorts",
+                "hi_title": "आदत न टूटने देने का अचूक 2-दिन वाला नियम #Shorts",
+                "gu_title": "સારી ટેવ ક્યારેય ન તૂટે તેનો 2-દિવસનો નિયમ #Shorts",
+                "en_s": [
+                    "One missed workout quietly turns into quitting for three whole months.",
+                    "Perfectionism fools you into thinking a bad day means starting over.",
+                    "Never miss twice: do a five-minute minimum version on tough days.",
+                    "Showing up briefly keeps the neural habit wire alive all year.",
+                    "Protect day two at all costs, and you will see why...",
+                ],
+                "hi_s": [
+                    "एक दिन की छुट्टी धीरे-धीरे तीन महीने के आलस्य में बदल जाती है।",
+                    "परफेक्शन की सोच हमें छोटे प्रयास करने से रोकती है।",
+                    "कभी लगातार दो दिन मत छोड़िए: व्यस्त दिन भी पांच मिनट जरूर करें।",
+                    "छोटा सा प्रयास पूरे साल आपकी आदत की डोर को टूटने नहीं देता।",
+                    "दूसरे दिन को किसी भी कीमत पर बचा लें, फिर देखिए कि कैसे...",
+                ],
+                "gu_s": [
+                    "એક દિવસની છૂટછાટ ધીમે ધીમે ત્રણ મહિનાની આળસમાં ફેરવાઈ જાય છે.",
+                    "બધું પરફેક્ટ કરવાની જીદ આપણને નાના પ્રયાસોથી પણ દૂર રાખે છે.",
+                    "ક્યારેય સતત બે દિવસ ન ચૂકો: વ્યસ્ત દિવસે પણ પાંચ મિનિટ જરૂર કરો.",
+                    "નાનકડું સાતત્ય આખું વર્ષ તમારી સારી ટેવને જીવંત રાખે છે.",
+                    "બીજા દિવસને કોઈ પણ ભોગે જાળવી રાખો, અને પછી જુઓ કે...",
+                ],
+                "poll_q": "How do you recover after missing a habit day?",
+                "poll_opts": ["Never miss twice rule", "5-minute minimum", "Lower daily friction", "Restart next morning"],
+            },
+        ]
+
         topic_lower = (topic or "").lower()
-        if "health" in topic_lower or "sleep" in topic_lower or "vitality" in topic_lower:
-            theme_cat = "health_habits"
-            pillar_name = "Practical Daily Health Habits"
-            en_title = "The Morning Habit Draining Your Brain #Shorts"
-            hi_title = "सुबह की यह गलत आदत तुरंत बदलो #Shorts"
-            gu_title = "સવારની આ ખરાબ આદત તરત જ બદલો #Shorts"
+        fresh_presets = [
+            p for p in presets
+            if not self.is_repetitive_title(p["en_title"], avoid_titles)
+        ] or presets
 
-            en_vo = "Checking your phone the instant you wake up is sabotaging your mental energy. You flood your half-asleep brain with cortisol and dopamine spikes, guaranteeing brain fog for the rest of the day. Rule number one: keep screens away for the first thirty minutes. Get direct sunlight in your eyes and drink a large glass of water. Subscribe to Daily Growth and master your daily vitality."
-            hi_vo = "सुबह आँख खुलते ही फोन देखना आपकी ऊर्जा को बर्बाद कर रहा है। ऐसा करने से दिमाग में तनाव और बेचैनी बढ़ती है, जिससे पूरा दिन थकान महसूस होती है। नियम नंबर एक याद रखिए: उठने के बाद पहले तीस मिनट तक स्क्रीन से दूर रहिए। ताजी हवा और धूप लीजिए और पानी पीजिए। अपनी सेहत सुधारने के लिए डेली ग्रोथ को सब्सक्राइब करें।"
-            gu_vo = "સવારે આંખ ખુલતાની સાથે જ મોબાઈલ જોવો એ તમારા દિવસની સૌથી મોટી ભૂલ છે. આમ કરવાથી મગજ પર સીધો તણાવ વધે છે અને આખો દિવસ આળસ રહે છે. નિયમ નંબર એક: સવારે ઉઠ્યા પછી પેહલી ત્રીસ મિનિટ સ્ક્રીનથી દૂર રહો. સૂર્યપ્રકાશ લો અને પાણી પીઓ. ઉત્તમ સ્વાસ્થ્ય માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
-
-            en_s1, hi_s1, gu_s1 = "Checking your phone the instant you wake up is sabotaging your mental energy.", "सुबह आँख खुलते ही फोन देखना आपकी ऊर्जा को बर्बाद कर रहा है।", "સવારે આંખ ખુલતાની સાથે જ મોબાઈલ જોવો એ તમારા દિવસની સૌથી મોટી ભૂલ છે."
-            en_s2, hi_s2, gu_s2 = "You flood your half-asleep brain with stress hormones, guaranteeing brain fog all day.", "ऐसा करने से दिमाग में तनाव और बेचैनी बढ़ती है, जिससे पूरा दिन थकान महसूस होती है।", "આમ કરવાથી મગજ પર સીધો તણાવ વધે છે અને આખો દિવસ આળસ અને થાક રહે છે."
-            en_s3, hi_s3, gu_s3 = "Rule number one: zero screens for thirty minutes. Get sunlight and drink water.", "नियम नंबर एक: उठने के बाद पहले तीस मिनट स्क्रीन से दूर रहिए और धूप लीजिए।", "નિયમ નંબર એક: સવારે ઉઠ્યા પછી પેહલી ત્રીસ મિનિટ સ્ક્રીનથી દૂર રહો અને તાજી હવા લો."
-            en_s4, hi_s4, gu_s4 = "Protect your morning. Subscribe to Daily Growth and master your daily vitality.", "अपनी सुबह की रक्षा करें। ऊर्जावान जीवन के लिए डेली ग्रोथ को सब्सक्राइब करें।", "તમારી સવારને સુધારો. ઉત્તમ સ્વાસ્થ્ય માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
-        elif "financ" in topic_lower or "money" in topic_lower or "wealth" in topic_lower:
-            theme_cat = "financial_discipline"
-            pillar_name = "Realistic Financial Discipline"
-            en_title = "Stop Buying Fake Wealth #Shorts"
-            hi_title = "दिखावे का खर्च तुरंत बंद करो #Shorts"
-            gu_title = "દેખાડો કરવાનું તરત જ બંધ કરો #Shorts"
-
-            en_vo = "Spending money to impress people who do not care about you is keeping you broke. Real wealth is what you do not see: the investments growing silently and the freedom to walk away. Rule number one: delay every non-essential purchase by twenty-four hours. If you still want it tomorrow, evaluate your priorities. Subscribe to Daily Growth and build unbreakable financial discipline."
-            hi_vo = "दूसरों को प्रभावित करने के लिए फिजूलखर्च करना आपको हमेशा गरीब बनाए रखेगा। सच्ची दौलત वह है जो दिखाई नहीं देती: आपकी बचत और आपकी आजादी। नियम नंबर एक: किसी भी गैर-जरूरी खरीदारी को चौबीસ घंटे के लिए टाल दीजिए। अगर कल भी उसकी जरूरत लगे, तभी विचार करें। आर्थिक रूप से मजबूत बनने के लिए डेली ग्रोथ को सब्सक्राइब करें।"
-            gu_vo = "બીજાને પ્રભાવિત કરવા માટે પૈસા બગાડવા એ ગરીબીની સૌથી મોટી નિશાની છે. ખરી સંપત્તિ એ છે જે દેખાતી નથી: તમારી બચત અને તમારી સ્વતંત્રતા. નિયમ નંબર એક: કોઈપણ બિનજરૂરી ખરીદીને ચોવીસ કલાક માટે ટાળો. જો કાલે પણ જરૂર લાગે તો જ વિચારો. આર્થિક મજબૂતી માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
-
-            en_s1, hi_s1, gu_s1 = "Spending money to impress people who do not care about you is keeping you broke.", "दूसरों को प्रभावित करने के लिए फिजूलखर्च करना आपको हमेशा गरीब बनाए रखेगा।", "બીજાને પ્રભાવિત કરવા માટે પૈસા બગાડવા એ ગરીબીની સૌથી મોટી નિશાની છે."
-            en_s2, hi_s2, gu_s2 = "Real wealth is what you do not see: quiet investments and genuine freedom.", "सच्ची दौलत वह है जो दिखाई नहीं देती: आपकी बचत और आपकी मानसिक आजादी।", "ખરી સંપત્તિ એ છે જે દેખાતી નથી: તમારી બચત અને તમારી સાચી સ્વતંત્રતા."
-            en_s3, hi_s3, gu_s3 = "Rule number one: delay every impulse purchase by twenty-four hours.", "नियम नंबर एक: किसी भी गैर-जरूरी खरीदारी को चौबीस घंटे के लिए टाल दीजिए।", "નિયમ નંબર એક: કોઈપણ બિનજરૂરી ખરીદીને ચોવીસ કલાક માટે ટાળી દો."
-            en_s4, hi_s4, gu_s4 = "Invest in freedom, not temporary status. Subscribe to Daily Growth today.", "दिखावे में नहीं, स्वतंत्रता में निवेश करें। डेली ग्रोथ को सब्सक्राइब करें।", "દેખાડામાં નહિ, સાચી આઝાદીમાં રોકાણ કરો. ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
+        matched = [
+            p for p in fresh_presets
+            if any(k in topic_lower for k in p["keywords"])
+        ]
+        if matched:
+            chosen = matched[int(time.time()) % len(matched)]
         else:
-            theme_cat = "stoic_resilience"
-            pillar_name = "Stoic Mental Resilience"
-            en_title = "Stop Letting Small Things Break You #Shorts"
-            hi_title = "हर छोटी बात पर परेशान होना बंद करो #Shorts"
-            gu_title = "દરેક નાની વાત પર ગુસ્સે થવાનું બંધ કરો #Shorts"
+            chosen = fresh_presets[int(time.time() // 60) % len(fresh_presets)]
 
-            en_vo = "Stop reacting to every tiny irritation in your day. When you let an insult or delay ruin your mood, you hand your power to strangers. The Stoics lived by one rule: you cannot control what happens, but you have 100% control over how you react. Breathe. Pause for three seconds. Choose calm over chaos. Subscribe to Daily Growth and master your mind."
-            hi_vo = "हर छोटी बात पर अपनी शांति खोना बंद कीजिए। जब आप किसी की बात या देरी से परेशान होते हैं, तो आप अपनी ताकत दूसरों को दे देते हैं। जीवन का सबसे बड़ा नियम यही है: हालात आपके वश में नहीं हैं, लेकिन आपकी प्रतिक्रिया पूरी तरह आपके नियंत्रण में है। तीन सेकंड रुकिए। गुस्से के बदले शांति चुनिए। डेली ग्रोथ को सब्सक्राइब करें और खुद पर विजय पाएं।"
-            gu_vo = "દરેક નાની વાત પર મન અશાંત કરવાનું બંધ કરો. જ્યારે તમે બીજાના શબ્દોથી ગુસ્સે થાઓ છો, ત્યારે તમે તમારી શક્તિ બીજાના હાથમાં સોંપી દો છો. જીવનનો સૌથી મોટો નિયમ છે: પરિસ્થિતિ તમારા હાથમાં નથી, પણ તમારી પ્રતિક્રિયા સો ટકા તમારા હાથમાં છે. ત્રણ સેકન્ડ ઊંડો શ્વાસ લો. ક્રોધની જગ્યાએ સંયમ પસંદ કરો. ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો અને સફળ બનો."
+        theme_cat = chosen["theme_cat"]
+        pillar_name = chosen["pillar"]
+        base_prompt = (
+            "Cinematic 9:16 vertical editorial film frame, natural warm key lighting, "
+            "shallow depth of field, 35mm documentary realism, 8k detail, strictly all-ages safe, no text overlay"
+        )
+        scene_styles = [
+            "disciplined person pausing with intense realization near sunlit desk, looking toward camera",
+            "close-up macro atmospheric shot of glowing mechanical clockwork gears and hourglass sand",
+            "clean minimalist study table with notebook, pen, and dramatic shadow geometry",
+            "calm silhouette standing by tall window overlooking sunrise city skyline",
+            "confident composed mentor walking forward with warm golden rim light",
+        ]
+        badges_map = {
+            "en": ["🛑 WAIT", "🧠 THE TRAP", "⚡ SHIFT", "✅ DO THIS", "🔁 LOOP"],
+            "hi": ["🛑 ध्यान दें", "🧠 असली सच", "⚡ नियम", "✅ आज करें", "🔁 याद रखें"],
+            "gu": ["🛑 સાવધાન", "🧠 સાચું કારણ", "⚡ નિયમ", "✅ આ કરો", "🔁 યાદ રાખો"],
+        }
 
-            en_s1, hi_s1, gu_s1 = "Stop reacting to every tiny irritation in your day. Never hand your power to strangers.", "हर छोटी बात पर अपनी शांति खोना बंद कीजिए। कभी अपनी ताकत दूसरों को मत सौंपिए।", "દરેક નાની વાત પર મન અશાંત કરવાનું બંધ કરો. ક્યારેય તમારી શક્તિ બીજાને ન સોંપો."
-            en_s2, hi_s2, gu_s2 = "The world wants you anxious and distracted, reacting blindly to every external impulse.", "यह दुनिया आपको हमेशा परेशान देखना चाहती है, ताकि आप अपने लक्ष्य से भटक जाएं।", "આ દુનિયા તમને હંમેશા ચિંતિત રાખવા માંગે છે, જેથી તમે તમારા ધ્યેયથી ભટકી જાઓ."
-            en_s3, hi_s3, gu_s3 = "Rule number one: you cannot control events, but you control your response.", "नियम नंबर एक: हालात आपके वश में नहीं हैं, लेकिन आपकी प्रतिक्रिया आपके हाथ में है।", "નિયમ નંબર એક: પરિસ્થિતિ તમારા હાથમાં નથી, પણ પ્રતિક્રિયા તમારા હાથમાં છે."
-            en_s4, hi_s4, gu_s4 = "Breathe. Choose calm over chaos. Subscribe to Daily Growth and master your mind.", "तीन सेकंड रुकिए। शांति चुनिए। खुद पर विजय पाने के लिए डेली ग्रोथ को सब्सक्राइब करें।", "ઊંડો શ્વાસ લો. સંયમ પસંદ કરો. પોતાના પર વિજય મેળવવા ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો."
-
-        base_prompt = "Cinematic 9:16 vertical cinema shot of a disciplined mentor in a dark tailored coat, ARRI Alexa LF, 35mm anamorphic lens, authentic natural lighting, 8k resolution, documentary realism, strictly fully clothed, no text overlay"
-
-        def _make_lang_scenes(s1, s2, s3, s4, b1, b2, b3, b4):
+        def _make_lang_scenes(lines: List[str], lang_code: str) -> List[Scene]:
+            durations = [3.8, 3.8, 4.0, 4.0, 3.6]
+            badges = badges_map[lang_code]
             return [
                 Scene(
-                    scene_number=1,
-                    narration=s1,
-                    speaker_entity="Disciplined Stoic Mentor in dark coat",
-                    speaking_action="Speaking directly into the camera with mouth open in mid-speech delivery",
-                    proper_sign="Raising hand in an authoritative STOP sign gesture 🛑",
-                    sign_badge=b1,
-                    visual_prompt=f"{base_prompt}, looking firmly into camera with mouth open speaking, holding palm up in firm STOP gesture",
-                    estimated_duration_sec=11.5,
-                ),
-                Scene(
-                    scene_number=2,
-                    narration=s2,
-                    speaker_entity="Disciplined Stoic Mentor in dark coat",
-                    speaking_action="Speaking with intense clarity gesturing to caution against traps",
-                    proper_sign="Holding up an antique pocket watch pointing to passing seconds ⏳",
-                    sign_badge=b2,
-                    visual_prompt=f"{base_prompt}, holding up an antique pocket watch pointing to time passing, intense focused eye contact",
-                    estimated_duration_sec=11.0,
-                ),
-                Scene(
-                    scene_number=3,
-                    narration=s3,
-                    speaker_entity="Disciplined Stoic Mentor in dark coat",
-                    speaking_action="Speaking with calm authority with index finger raised firmly",
-                    proper_sign="Raising index finger upright delivering Rule #1 point ☝️",
-                    sign_badge=b3,
-                    visual_prompt=f"{base_prompt}, index finger raised upright delivering Rule #1 lesson, warm golden rim lighting",
-                    estimated_duration_sec=12.0,
-                ),
-                Scene(
-                    scene_number=4,
-                    narration=s4,
-                    speaker_entity="Disciplined Stoic Mentor in dark coat",
-                    speaking_action="Speaking with warm resolute conviction gesturing down to subscribe",
-                    proper_sign="Pointing down towards comments and subscribe button 👇",
-                    sign_badge=b4,
-                    visual_prompt=f"{base_prompt}, pointing down towards bottom frame with confident nod, inspiring sunrise background",
-                    estimated_duration_sec=11.0,
-                ),
+                    scene_number=idx + 1,
+                    narration=lines[idx],
+                    speaker_entity="Disciplined Mentor",
+                    speaking_action="Delivering concise point directly with expressive posture",
+                    proper_sign=f"Visual emphasis cue #{idx + 1}",
+                    sign_badge=badges[idx],
+                    visual_prompt=f"{base_prompt}, {scene_styles[idx]}",
+                    estimated_duration_sec=durations[idx],
+                )
+                for idx in range(5)
             ]
 
-        en_scenes = _make_lang_scenes(en_s1, en_s2, en_s3, en_s4, "🛑 STOP THIS", "⚡ THE TRAP", "🧠 RULE #1", "👇 SUBSCRIBE")
-        hi_scenes = _make_lang_scenes(hi_s1, hi_s2, hi_s3, hi_s4, "🛑 रुकिए", "⚡ असली सच", "🧠 नियम #1", "👇 सब्सक्राइब करें")
-        gu_scenes = _make_lang_scenes(gu_s1, gu_s2, gu_s3, gu_s4, "🛑 ઊભા રહો", "⚡ સાચો રસ્તો", "🧠 નિયમ #1", "👇 સબ્સ્ક્રાઇબ કરો")
+        en_vo = " ".join(chosen["en_s"])
+        hi_vo = " ".join(chosen["hi_s"])
+        gu_vo = " ".join(chosen["gu_s"])
 
         poll = CommunityPoll(
-            question=f"What is your biggest daily focus challenge in {pillar_name}?",
-            options=["Consistent Execution", "Digital Distractions", "Emotional Reactions", "Lack of Energy"],
-            post_text=f"How do you stay disciplined under pressure? Cast your vote below! #DailyGrowth #Mindset",
+            question=chosen["poll_q"],
+            options=chosen["poll_opts"],
+            post_text=f"{chosen['poll_q']} Share your pick below! #DailyGrowth #Mindset",
         )
 
         english_pkg = LanguageScript(
             language="en",
-            title=en_title,
-            description="Master your habits, emotions, and discipline with timeless daily wisdom. Subscribe to Daily Growth for daily masterclasses.",
-            hashtags="#mindset #discipline #DailyGrowth #motivation #Shorts",
-            tags=["Daily Growth", "Motivation", "Self Improvement", "Discipline", "Shorts"],
+            title=chosen["en_title"],
+            description=f"{chosen['en_s'][0]} {chosen['en_s'][2]} Subscribe to Daily Growth for practical daily psychology.",
+            hashtags="#mindset #discipline #DailyGrowth #psychology #Shorts",
+            tags=["Daily Growth", pillar_name, "Self Improvement", "Psychology", "Shorts"],
             voiceover_script=en_vo,
-            scenes=en_scenes,
+            scenes=_make_lang_scenes(chosen["en_s"], "en"),
         )
-
         hindi_pkg = LanguageScript(
             language="hi",
-            title=hi_title,
-            description="अपनी भावनाओं, आदतों और विचारों पर नियंत्रण पाएं। मानसिक मजबूती के लिए डेली ग्रोथ को सब्सक्राइब करें।",
+            title=chosen["hi_title"],
+            description=f"{chosen['hi_s'][0]} {chosen['hi_s'][2]} डेली ग्रोथ को सब्सक्राइब करें।",
             hashtags="#motivation #mindset #DailyGrowth #hindi #Shorts",
             tags=["डेली ग्रोथ", "आत्म विकास", "मानसिक मजबूती", "प्रेरणा", "शॉर्ट्स"],
             voiceover_script=hi_vo,
-            scenes=hi_scenes,
+            scenes=_make_lang_scenes(chosen["hi_s"], "hi"),
         )
-
         gujarati_pkg = LanguageScript(
             language="gu",
-            title=gu_title,
-            description="તમારા મન, આદતો અને વિચારો પર કાબૂ મેળવો. જીવનમાં આગળ વધવા માટે ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો.",
+            title=chosen["gu_title"],
+            description=f"{chosen['gu_s'][0]} {chosen['gu_s'][2]} ડેઇલી ગ્રોથને સબ્સ્ક્રાઇબ કરો.",
             hashtags="#gujarati #motivation #DailyGrowth #mindset #Shorts",
             tags=["ડેઇલી ગ્રોથ", "પ્રેરણા", "માનસિક શાંતિ", "આત્મવિશ્વાસ", "શોર્ટસ"],
             voiceover_script=gu_vo,
-            scenes=gu_scenes,
+            scenes=_make_lang_scenes(chosen["gu_s"], "gu"),
         )
 
         return TrilingualShortsPackage(
@@ -1066,11 +1433,7 @@ Subscribe to Daily Growth for daily masterclasses in self-improvement and high p
             description=en.description,
             tags=en.tags,
             category_id=config.DEFAULT_CATEGORY_ID,
-            pinned_comment=f"What is the single biggest habit you are working on today? Share your thoughts below!",
+            pinned_comment="Which rule are you testing today? Comment below!",
             scenes=en.scenes,
             community_poll=trilingual_fallback.community_poll,
         )
-
-
-
-

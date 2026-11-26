@@ -546,12 +546,24 @@ def hourly_cycle():
     except Exception as e:
         logger.debug(f"Cybersecurity audit notice: {e}")
 
-    # 7. Autonomous Creative Evolution & Surprise Brainstorming Pulse
+    # 7. Autonomous Creative Evolution, Live Performance Analytics & Surprise Sparks Pulse
     try:
         from growth.evolution_engine import EvolutionEngine
         EvolutionEngine().evolve_creative_formulas()
     except Exception as e:
         logger.debug(f"Creative evolution pulse notice: {e}")
+
+    try:
+        from growth.growth_engine import GrowthEngine
+        GrowthEngine().evolve_channel_strategy(force=False, cache_hours=4.0)
+    except Exception as e:
+        logger.debug(f"YouTube analytics pulse notice: {e}")
+
+    try:
+        from growth.social_analytics import SocialGrowthEngine
+        SocialGrowthEngine().evolve_social_strategy(force=False, cache_hours=4.0)
+    except Exception as e:
+        logger.debug(f"Social analytics pulse notice: {e}")
 
     # 8. Automated Daily 1-Click YouTube Stuck Video Cleaner (Runs strictly 1 time per day)
     try:

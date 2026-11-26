@@ -166,6 +166,36 @@ async def status_handler(request: web.Request) -> web.Response:
         except Exception:
             pass
 
+    # 8. Live Performance Growth Analytics (YouTube Watch Hours/Views & Social Reels)
+    youtube_analytics = {"growth_score": 0, "total_views": 0, "total_estimated_watch_hours": 0, "videos_analyzed": 0}
+    social_analytics = {"social_growth_score": 0, "followers": 0, "reels_avg_views": 0, "reels_avg_likes": 0}
+    try:
+        from growth.growth_engine import GrowthEngine
+        yt_mem = GrowthEngine().load_growth_memory()
+        if yt_mem:
+            youtube_analytics = {
+                "growth_score": yt_mem.get("growth_score", 0),
+                "total_views": yt_mem.get("total_views", 0),
+                "total_estimated_watch_hours": yt_mem.get("total_estimated_watch_hours", 0),
+                "videos_analyzed": yt_mem.get("videos_analyzed", 0),
+                "last_analyzed": yt_mem.get("last_analyzed", ""),
+            }
+    except Exception:
+        pass
+    try:
+        from growth.social_analytics import SocialGrowthEngine
+        soc_mem = SocialGrowthEngine().load_social_memory()
+        if soc_mem:
+            social_analytics = {
+                "social_growth_score": soc_mem.get("social_growth_score", 0),
+                "followers": soc_mem.get("followers", 0),
+                "reels_avg_views": soc_mem.get("reels_avg_views", 0),
+                "reels_avg_likes": soc_mem.get("reels_avg_likes", 0),
+                "last_analyzed": soc_mem.get("last_analyzed", ""),
+            }
+    except Exception:
+        pass
+
     return web.json_response({
         "status": "OK",
         "model": config.GEMINI_MODEL,
@@ -176,6 +206,8 @@ async def status_handler(request: web.Request) -> web.Response:
         "evolution": evolution_info,
         "social_queue": social_queue_info,
         "cleaner": cleaner_info,
+        "youtube_analytics": youtube_analytics,
+        "social_analytics": social_analytics,
         "logs": recent_logs,
     })
 
@@ -410,6 +442,26 @@ async def execute_spark_handler(request: web.Request) -> web.Response:
     return web.json_response(res)
 
 
+async def refresh_analytics_handler(request: web.Request) -> web.Response:
+    if not check_auth(request):
+        return web.json_response({"status": "UNAUTHORIZED"}, status=401)
+    try:
+        from growth.growth_engine import GrowthEngine
+        from growth.social_analytics import SocialGrowthEngine
+
+        loop = asyncio.get_event_loop()
+        yt_res = await loop.run_in_executor(None, lambda: GrowthEngine().evolve_channel_strategy(force=True))
+        soc_res = await loop.run_in_executor(None, lambda: SocialGrowthEngine().evolve_social_strategy(force=True))
+        return web.json_response({
+            "status": "OK",
+            "youtube_analytics": yt_res,
+            "social_analytics": soc_res,
+            "message": f"Analytics synced: YT {yt_res.get('total_views', 0)} views / IG Reels {soc_res.get('reels_avg_views', 0)} avg views.",
+        })
+    except Exception as e:
+        return web.json_response({"status": "ERROR", "message": str(e)}, status=500)
+
+
 # --------------------------------------------------------------------------
 # App Factory & Runner
 # --------------------------------------------------------------------------
@@ -418,6 +470,7 @@ def create_app() -> web.Application:
     app.router.add_get("/", index_handler)
     app.router.add_post("/api/login", login_handler)
     app.router.add_get("/api/status", status_handler)
+    app.router.add_post("/api/analytics/refresh", refresh_analytics_handler)
     app.router.add_post("/api/trigger/shorts", trigger_shorts_handler)
     app.router.add_post("/api/trigger/festival", trigger_festival_handler)
     app.router.add_post("/api/trigger/pending", trigger_pending_handler)

@@ -120,6 +120,13 @@ class FestivalSocialAgent:
                 "date": today_str
             }
 
+        # 0. Refresh social analytics silently (respects 4h cache) so generation adapts dynamically
+        try:
+            from growth.social_analytics import SocialGrowthEngine
+            SocialGrowthEngine().evolve_social_strategy(force=False)
+        except Exception as sg_err:
+            logger.debug(f"Social analytics pre-check notice: {sg_err}")
+
         # 1. ALWAYS check and upload any waiting Story/ folder media ALONGSIDE generated content!
         story_uploads = self.process_story_folder(dry_run=dry_run)
 
@@ -219,6 +226,15 @@ class FestivalSocialAgent:
                 if video_path and video_path.exists():
                     vid_ok = self.story_watcher.process_file(video_path, force=True)
                     upload_results["video"] = "PUBLISHED" if vid_ok else "STORED_FOR_RETRY"
+                    # Publish vertical video as an Instagram Reel (highest organic reach format per live analytics)
+                    try:
+                        reel_res = self.story_watcher.api_uploader.post_instagram_reel_direct(video_path, caption)
+                        upload_results["instagram_reel"] = reel_res.get("status", "SKIPPED")
+                        if reel_res.get("url"):
+                            upload_results["instagram_reel_url"] = reel_res["url"]
+                    except Exception as reel_err:
+                        logger.debug(f"Instagram Reel direct publish notice: {reel_err}")
+                        upload_results["instagram_reel"] = "SKIPPED"
                     if not vid_ok and video_path.exists():
                         self.story_watcher.queue_manager.enqueue_failed(
                             media_path=video_path,
@@ -328,7 +344,7 @@ class FestivalSocialAgent:
         }
 
     def _get_daily_re_showcase_info(self, today: datetime.date) -> FestivalInfo:
-        """Produces daily Royal Enfield showcase & maintenance theme for non-festival days."""
+        """Produces daily Royal Enfield showcase & maintenance theme enriched with social analytics."""
         day_name = today.strftime("%A")
         date_str = today.strftime("%Y-%m-%d")
         daily_themes = {
@@ -341,6 +357,21 @@ class FestivalSocialAgent:
             "Sunday": ("Weekend Rider Brotherhood & Community Pride", "Riding brotherhood, group tour safety, and complete Sunday machine inspection"),
         }
         theme_title, theme_desc = daily_themes.get(day_name, ("Royal Enfield Daily Ride & Genuine Care", "Daily Royal Enfield maintenance and pure riding passion"))
+
+        # Enrich non-festival angle dynamically from SocialGrowthEngine analytics
+        try:
+            from growth.social_analytics import SocialGrowthEngine
+
+            mem = SocialGrowthEngine().load_social_memory()
+            angles = mem.get("recommended_daily_angles") or []
+            if isinstance(angles, list) and angles:
+                angle = str(angles[today.toordinal() % len(angles)]).strip()
+                if angle and "error" not in angle.lower():
+                    theme_title = f"{theme_title} ({angle[:48]})"
+                    theme_desc = f"{theme_desc}. Featured audience angle: {angle}"
+        except Exception:
+            pass
+
         return FestivalInfo(
             is_festival=True,
             festival_name=f"Chamunda Royal Enfield {day_name} Special",
