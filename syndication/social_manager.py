@@ -276,9 +276,10 @@ class SocialManager:
 
         engine = SocialGrowthEngine()
         mem = engine.evolve_social_strategy(force=force)
+        ig = mem.get("instagram_stats", {}) or {}
         logger.info(
-            f"📱 [Social Growth] Followers={mem.get('followers', 0)} | "
-            f"Reels avg={mem.get('reels_avg_views', 0)} views / {mem.get('reels_avg_likes', 0)} likes | "
+            f"📱 [Social Growth] Followers={ig.get('followers', 0)} | "
+            f"Reels avg={ig.get('recent_reels_avg_views', 0)} views / {ig.get('recent_reels_avg_likes', 0)} likes | "
             f"Score={mem.get('social_growth_score', 0)}"
         )
         return mem
