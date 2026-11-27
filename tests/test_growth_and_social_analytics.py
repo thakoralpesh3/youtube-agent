@@ -120,68 +120,67 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
-            engine = SocialGrowthEngine()
+            engine = SocialGrowthEngine(api_key="dummy-key")
             engine.memory_file = tmp / "social_growth.json"
 
             ig_data = {
-                "username": "royal_chamunda_auto",
-                "followers": 575,
-                "media_count": 110,
-                "items": [
+                "account": {"username": "royal_chamunda_auto", "followers": 575, "media_count": 110},
+                "posts": [
                     {
                         "id": "r1",
-                        "format": "reel",
+                        "product_type": "clips",
+                        "media_type": 2,
                         "likes": 150,
                         "comments": 8,
                         "views": 2400,
-                        "caption": "Royal Enfield Classic 350 service in Kalol #RoyalEnfield #Kalol",
+                        "caption_snippet": "Royal Enfield Classic 350 service in Kalol",
                         "hashtags": ["#royalenfield", "#kalol"],
                         "taken_at": "2026-11-20T10:00:00Z",
                     },
                     {
                         "id": "p1",
-                        "format": "feed",
+                        "product_type": "feed",
+                        "media_type": 1,
                         "likes": 3,
                         "comments": 0,
                         "views": 0,
-                        "caption": "Poster #RoyalEnfield",
+                        "caption_snippet": "Poster",
                         "hashtags": ["#royalenfield"],
                         "taken_at": "2026-11-21T10:00:00Z",
                     },
                 ],
             }
             local = {
-                "total_published_events": 12,
-                "published_by_platform": {"instagram": 4, "facebook": 4, "whatsapp": 4},
-                "pending_queue_count": 1,
-                "festival_campaigns_count": 5,
+                "delivery": {"instagram": {"published": 4, "failed": 0}},
+                "recent_campaigns": [{"date": "2026-11-26", "name": "Daily RE Special"}],
             }
             summary = engine._summarize_social(ig_data, None, local)
-            self.assertEqual(summary["reels_avg_views"], 2400.0)
-            self.assertEqual(summary["reels_avg_likes"], 150.0)
-            self.assertEqual(summary["feed_avg_likes"], 3.0)
+            self.assertEqual(summary["instagram_stats"]["recent_reels_avg_views"], 2400.0)
+            self.assertEqual(summary["instagram_stats"]["recent_reels_avg_likes"], 150.0)
+            self.assertEqual(summary["instagram_stats"]["recent_feed_avg_likes"], 3.0)
             self.assertIn("#royalenfield", summary["top_hashtags"])
 
+            fake_res = SimpleNamespace(
+                text=json.dumps({
+                    "winning_content_angles": ["RE service thump"],
+                    "winning_hook_formulas": ["Open with exhaust note"],
+                    "top_hashtags": ["#RoyalEnfield", "#ChamundaAutomobile"],
+                    "caption_rules": ["Hook on line 1"],
+                    "visual_and_pacing_rules": ["Cut every 4s"],
+                    "avoid_patterns": ["Static poster videos"],
+                    "recommended_daily_angles": ["Monsoon Chain Care"],
+                })
+            )
             with patch.object(engine, "fetch_instagram_analytics", return_value=ig_data), \
                  patch.object(engine, "fetch_facebook_analytics", return_value=None), \
                  patch.object(engine, "_collect_local_social_logs", return_value=local), \
-                 patch("growth.social_analytics.call_gemini_resilient", return_value=(
-                     json.dumps({
-                         "social_growth_score": 880,
-                         "winning_content_pillars": ["RE service thump"],
-                         "winning_caption_style": "Hook-first",
-                         "best_hashtag_set": ["#RoyalEnfield", "#ChamundaAutomobile"],
-                         "recommended_daily_angles": ["Monsoon Chain Care"],
-                         "anti_patterns": ["Static poster videos"],
-                     }),
-                     "gemini-3-flash-preview",
-                 )):
+                 patch("growth.social_analytics.call_gemini_resilient", return_value=(fake_res, "gemini-3-flash-preview")):
                 mem = engine.evolve_social_strategy(force=True)
-                self.assertEqual(mem["social_growth_score"], 880)
+                self.assertEqual(mem["winning_content_angles"], ["RE service thump"])
                 self.assertTrue(engine.memory_file.exists())
                 ctx = engine.get_social_prompt_context()
-                self.assertIn("Reels avg", ctx)
-                self.assertIn("Monsoon Chain Care", ctx)
+                self.assertIn("Reels Avg=2400.0 views", ctx)
+                self.assertIn("RE service thump", ctx)
 
     def test_script_generator_duplicate_filter_and_rotating_fallback(self):
         from generator.script_generator import ScriptGenerator, is_repetitive_title

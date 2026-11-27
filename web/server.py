@@ -186,12 +186,13 @@ async def status_handler(request: web.Request) -> web.Response:
         from growth.social_analytics import SocialGrowthEngine
         soc_mem = SocialGrowthEngine().load_social_memory()
         if soc_mem:
+            ig_stats = soc_mem.get("instagram_stats", {}) or {}
             social_analytics = {
                 "social_growth_score": soc_mem.get("social_growth_score", 0),
-                "followers": soc_mem.get("followers", 0),
-                "reels_avg_views": soc_mem.get("reels_avg_views", 0),
-                "reels_avg_likes": soc_mem.get("reels_avg_likes", 0),
-                "last_analyzed": soc_mem.get("last_analyzed", ""),
+                "followers": ig_stats.get("followers", soc_mem.get("followers", 0)),
+                "reels_avg_views": ig_stats.get("recent_reels_avg_views", soc_mem.get("reels_avg_views", 0)),
+                "reels_avg_likes": ig_stats.get("recent_reels_avg_likes", soc_mem.get("reels_avg_likes", 0)),
+                "last_analyzed": soc_mem.get("last_analyzed_at", soc_mem.get("last_analyzed", "")),
             }
     except Exception:
         pass
@@ -456,7 +457,7 @@ async def refresh_analytics_handler(request: web.Request) -> web.Response:
             "status": "OK",
             "youtube_analytics": yt_res,
             "social_analytics": soc_res,
-            "message": f"Analytics synced: YT {yt_res.get('total_views', 0)} views / IG Reels {soc_res.get('reels_avg_views', 0)} avg views.",
+            "message": f"Analytics synced: YT {yt_res.get('total_views', 0)} views / IG Reels {(soc_res.get('instagram_stats') or {}).get('recent_reels_avg_views', 0)} avg views.",
         })
     except Exception as e:
         return web.json_response({"status": "ERROR", "message": str(e)}, status=500)

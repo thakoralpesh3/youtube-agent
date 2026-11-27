@@ -293,7 +293,7 @@ class SocialGrowthEngine:
                 "total_recent_views": total_views,
                 "total_recent_likes": total_likes,
             },
-            "facebook_posts_count": len(fb_data.get("posts", [])),
+            "facebook_posts_count": len(fb_posts),
             "delivery": local_data.get("delivery", {}),
             "recent_campaigns": local_data.get("recent_campaigns", []),
             "top_posts": top_posts,
