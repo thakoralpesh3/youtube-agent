@@ -45,7 +45,8 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
             self.assertEqual(_parse_iso_duration_sec("PT12M30S"), 750)
             self.assertEqual(_parse_iso_duration_sec("PT1H2M5S"), 3725)
 
-            local_meta = engine._collect_local_run_metadata(out_dir)
+            with patch("growth.growth_engine.config.OUTPUT_DIR", out_dir):
+                local_meta = engine._collect_local_run_metadata()
             self.assertIn("v_en_1", local_meta)
             self.assertEqual(local_meta["v_en_1"]["lang"], "en")
             self.assertEqual(local_meta["v_hi_1"]["lang"], "hi")
@@ -171,9 +172,9 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
                     "recommended_daily_angles": ["Monsoon Chain Care"],
                 })
             )
-            with patch.object(engine, "fetch_instagram_analytics", return_value=ig_data), \
-                 patch.object(engine, "fetch_facebook_analytics", return_value=None), \
-                 patch.object(engine, "_collect_local_social_logs", return_value=local), \
+            with patch.object(engine, "_fetch_instagram_metrics", return_value=ig_data), \
+                 patch.object(engine, "_fetch_facebook_metrics", return_value={}), \
+                 patch.object(engine, "_collect_local_social_telemetry", return_value=local), \
                  patch("growth.social_analytics.call_gemini_resilient", return_value=(fake_res, "gemini-3-flash-preview")):
                 mem = engine.evolve_social_strategy(force=True)
                 self.assertEqual(mem["winning_content_angles"], ["RE service thump"])
