@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 class TestYouTubeAndSocialAnalytics(unittest.TestCase):
     def test_growth_engine_parses_trilingual_long_and_detects_saturated(self):
-        from growth.growth_engine import GrowthEngine
+        from growth.growth_engine import GrowthEngine, _parse_iso_duration_sec
 
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir)
@@ -41,9 +41,9 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
             engine = GrowthEngine(api_key="dummy-key")
             engine.memory_file = out_dir / "channel_growth.json"
 
-            self.assertEqual(engine._parse_iso_duration_sec("PT45S"), 45)
-            self.assertEqual(engine._parse_iso_duration_sec("PT12M30S"), 750)
-            self.assertEqual(engine._parse_iso_duration_sec("PT1H2M5S"), 3725)
+            self.assertEqual(_parse_iso_duration_sec("PT45S"), 45)
+            self.assertEqual(_parse_iso_duration_sec("PT12M30S"), 750)
+            self.assertEqual(_parse_iso_duration_sec("PT1H2M5S"), 3725)
 
             local_meta = engine._collect_local_run_metadata(out_dir)
             self.assertIn("v_en_1", local_meta)
