@@ -105,10 +105,11 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
                 json.dumps(
                     {
                         "saturated_titles": ["Repeated Trap Title #Shorts"],
-                        "winning_topics": ["Focus discipline"],
-                        "winning_hook_formula": "Open with a 2-second contrast",
-                        "long_video_strategy": "Use bold 2-word thumbnail accents",
-                        "anti_patterns": ["Repeating identical fallback titles"],
+                        "peak_engagement_themes": ["Focus discipline"],
+                        "best_performing_hook_styles": ["Open with a 2-second contrast"],
+                        "key_retention_rules": ["Keep 5 scenes under 4s each"],
+                        "long_form_watch_hour_rules": ["Use bold 2-word thumbnail accents"],
+                        "underperforming_patterns_to_avoid": ["Repeating identical fallback titles"],
                     }
                 ),
                 encoding="utf-8",
