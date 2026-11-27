@@ -242,14 +242,19 @@ class SocialGrowthEngine:
 
     def _summarize_social(
         self,
-        ig_data: Dict[str, Any],
-        fb_data: Dict[str, Any],
-        local_data: Dict[str, Any],
+        ig_data: Optional[Dict[str, Any]],
+        fb_data: Optional[Dict[str, Any]],
+        local_data: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Computes objective social performance KPIs, winning hashtags, and Reel vs Feed contrast."""
-        all_posts = list(ig_data.get("posts", [])) + list(fb_data.get("posts", []))
-        reels = [p for p in ig_data.get("posts", []) if p.get("product_type") == "clips" or p.get("media_type") == 2]
-        feeds = [p for p in ig_data.get("posts", []) if p.get("product_type") == "feed" and p.get("media_type") == 1]
+        ig_data = ig_data or {}
+        fb_data = fb_data or {}
+        local_data = local_data or {}
+        ig_posts = list(ig_data.get("posts", []))
+        fb_posts = list(fb_data.get("posts", []))
+        all_posts = ig_posts + fb_posts
+        reels = [p for p in ig_posts if p.get("product_type") == "clips" or p.get("media_type") == 2]
+        feeds = [p for p in ig_posts if p.get("product_type") == "feed" and p.get("media_type") == 1]
 
         reel_views = sum(p.get("views", 0) for p in reels)
         reel_likes = sum(p.get("likes", 0) for p in reels)

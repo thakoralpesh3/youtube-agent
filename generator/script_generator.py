@@ -1325,7 +1325,7 @@ Subscribe to Daily Growth for practical breakdowns in focus, health, and stoic d
         topic_lower = (topic or "").lower()
         fresh_presets = [
             p for p in presets
-            if not self.is_repetitive_title(p["en_title"], avoid_titles)
+            if not is_repetitive_title(p["en_title"], avoid_titles)
         ] or presets
 
         matched = [
