@@ -173,12 +173,13 @@ async def status_handler(request: web.Request) -> web.Response:
         from growth.growth_engine import GrowthEngine
         yt_mem = GrowthEngine().load_growth_memory()
         if yt_mem:
+            cs = yt_mem.get("channel_stats", {}) or {}
             youtube_analytics = {
                 "growth_score": yt_mem.get("growth_score", 0),
-                "total_views": yt_mem.get("total_views", 0),
-                "total_estimated_watch_hours": yt_mem.get("total_estimated_watch_hours", 0),
-                "videos_analyzed": yt_mem.get("videos_analyzed", 0),
-                "last_analyzed": yt_mem.get("last_analyzed", ""),
+                "total_views": cs.get("total_views", yt_mem.get("total_views", 0)),
+                "total_estimated_watch_hours": cs.get("estimated_watch_hours", yt_mem.get("total_estimated_watch_hours", 0)),
+                "videos_analyzed": cs.get("total_videos_analyzed", yt_mem.get("videos_analyzed", 0)),
+                "last_analyzed": yt_mem.get("last_analyzed_at", yt_mem.get("last_analyzed", "")),
             }
     except Exception:
         pass

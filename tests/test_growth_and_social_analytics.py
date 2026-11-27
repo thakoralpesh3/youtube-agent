@@ -59,12 +59,12 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
                     "title": "Repeated Trap Title #Shorts",
                     "published_at": "2026-11-20T09:00:00Z",
                     "duration_sec": 35,
-                    "format": "shorts",
+                    "format": "short",
                     "lang": "en",
                     "views": 0,
                     "likes": 0,
                     "comments": 0,
-                    "est_watch_hours": 0.0,
+                    "watch_minutes": 0.0,
                 }
                 for i in range(4)
             ] + [
@@ -73,12 +73,12 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
                     "title": "असली अनुशासन नियम #Shorts",
                     "published_at": "2026-11-22T09:00:00Z",
                     "duration_sec": 22,
-                    "format": "shorts",
+                    "format": "short",
                     "lang": "hi",
                     "views": 180,
                     "likes": 9,
                     "comments": 2,
-                    "est_watch_hours": 0.72,
+                    "watch_minutes": 43.2,
                 },
                 {
                     "video_id": "long_1",
@@ -90,15 +90,16 @@ class TestYouTubeAndSocialAnalytics(unittest.TestCase):
                     "views": 40,
                     "likes": 4,
                     "comments": 1,
-                    "est_watch_hours": 1.8,
+                    "watch_minutes": 108.0,
                 },
             ]
             summary = engine._summarize_analytics(videos)
-            self.assertEqual(summary["total_videos_analyzed"], 6)
-            self.assertEqual(summary["total_views"], 220)
-            self.assertGreater(summary["total_estimated_watch_hours"], 2.4)
+            stats = summary["channel_stats"]
+            self.assertEqual(stats["total_videos_analyzed"], 6)
+            self.assertEqual(stats["total_views"], 220)
+            self.assertGreater(stats["estimated_watch_hours"], 2.4)
             self.assertIn("Repeated Trap Title #Shorts", summary["saturated_titles"])
-            self.assertEqual(summary["language_breakdown"]["hi"]["avg_views"], 180.0)
+            self.assertEqual(summary["language_performance"]["hi"]["avg_views"], 180.0)
 
             engine.memory_file.write_text(
                 json.dumps(
